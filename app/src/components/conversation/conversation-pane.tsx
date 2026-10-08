@@ -251,9 +251,9 @@ export function ConversationPane({ box, session, agent: remembered, visible, onS
   const recognised = state === "waiting" && !staleNow && (answerable || (!formAsk && !ask?.form && (ask ? !!ask.choices.length : !!s?.ask?.tool)));
   const live = useLiveScreen({ box, session, agent, enabled: visible && !mock && !away && !!s && state !== "exited" && !recognised, running: state === "running", nudge });
 
-  // Claude Code and Codex write their conversation once they start: until
-  // then a new agent has nothing to read yet, which is not a dead end.
-  const readable = agent === "claude" || agent === "codex";
+  // Readable agents may have nothing to show before their first prompt;
+  // a new conversation is not a dead end.
+  const readable = agent === "claude" || agent === "codex" || agent === "opencode";
   const ended = state === "exited";
   // In its own pane when the pane says how; otherwise a new tab.
   const again = () => (onStartAgain ? onStartAgain() : void startSession(agent ?? "claude", { kind: "tab" }, agent ? agentLabel(agent) : "Agent"));

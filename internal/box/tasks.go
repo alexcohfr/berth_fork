@@ -119,6 +119,11 @@ var modelWord = regexp.MustCompile(`^[A-Za-z0-9._:/-]+$`)
 // plain name, or one the agent has no flag for, is refused.
 func AgentCommandWith(p AgentPreset, prompt, model, effort string) (string, error) {
 	cmd := p.Command
+	if p.ID == "opencode" && p.Command == "opencode" {
+		// V2's Mini accepts --model. A private server inherits this pane's
+		// BERTH_SESSION and worktree environment instead of another client's.
+		cmd += " mini --standalone"
+	}
 	if model != "" {
 		if !modelWord.MatchString(model) || strings.HasPrefix(model, "-") {
 			return "", badRequest("%q is not a model name", model)

@@ -85,6 +85,9 @@ func (b *Box) transcript(w http.ResponseWriter, r *http.Request) error {
 		return err
 	}
 	since, _ := strconv.Atoi(r.URL.Query().Get("since"))
+	if controlAgent(sess) == "opencode" {
+		return b.openCodeTranscript(w, r, sess)
+	}
 	agent, path, where := b.transcriptFile(r, sess)
 	none := func(reason string) error {
 		writeJSON(w, transcript.Result{Source: "none", Items: []transcript.Item{}, Crew: []transcript.CrewMember{}, Reason: reason})
@@ -118,6 +121,9 @@ func (b *Box) toolDetail(w http.ResponseWriter, r *http.Request) error {
 	sess, err := b.Sessions.Get(r.Context(), r.PathValue("name"))
 	if err != nil {
 		return err
+	}
+	if controlAgent(sess) == "opencode" {
+		return b.openCodeToolDetail(w, r, sess)
 	}
 	agent, path, _ := b.transcriptFile(r, sess)
 	if path == "" {

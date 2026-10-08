@@ -1,0 +1,67 @@
+{
+  "data": [
+    {
+      "id": "msg_acme_reply",
+      "type": "assistant",
+      "agent": "build",
+      "model": { "providerID": "acme", "id": "model" },
+      "time": { "created": 3000 },
+      "content": [
+        { "type": "reasoning", "text": "private reasoning should never appear" },
+        { "type": "text", "text": "I found the retry bug." },
+        {
+          "type": "tool",
+          "id": "call_edit",
+          "name": "edit",
+          "time": { "created": 3100 },
+          "state": {
+            "status": "running",
+            "input": { "filePath": "/acme/src/retry.ts", "oldString": "retry()", "newString": "await retry()" },
+            "metadata": {}
+          }
+        },
+        {
+          "type": "tool",
+          "id": "call_partial",
+          "name": "shell",
+          "time": { "created": 3200 },
+          "state": { "status": "streaming", "input": "{\"command\":" }
+        }
+      ]
+    },
+    {
+      "id": "msg_acme_tools",
+      "type": "assistant",
+      "agent": "build",
+      "model": { "providerID": "acme", "id": "model" },
+      "time": { "created": 2000, "completed": 2500 },
+      "content": [
+        {
+          "type": "tool",
+          "id": "call_read",
+          "name": "read",
+          "time": { "created": 2100, "completed": 2200 },
+          "state": {
+            "status": "completed",
+            "input": { "path": "/acme/src/retry.ts" },
+            "content": [{ "type": "text", "text": "export function retry() {}" }]
+          }
+        },
+        {
+          "type": "tool",
+          "id": "call_test",
+          "name": "shell",
+          "time": { "created": 2300, "completed": 2400 },
+          "state": {
+            "status": "error",
+            "input": { "command": "pnpm test" },
+            "error": { "type": "tool.execution", "message": "one test failed" },
+            "content": [{ "type": "text", "text": "expected retry count: 2" }]
+          }
+        }
+      ]
+    },
+    { "id": "msg_acme_user", "type": "user", "time": { "created": 1000 }, "text": "Fix the retry test" }
+  ],
+  "cursor": { "previous": null, "next": null }
+}

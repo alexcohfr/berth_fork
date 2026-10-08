@@ -125,12 +125,26 @@ func InstallTool(home, tool, bin string, out io.Writer) error {
 			fmt.Fprintf(out, "Gemini CLI: MCP server %s in %s\n", verb(changed), settings)
 		}
 	case "opencode":
-		plugin := filepath.Join(home, ".config", "opencode", "plugin", "berth.js")
+		plugin := filepath.Join(home, ".config", "opencode", "plugins", "berth.js")
 		changed, err := InstallOpenCodePlugin(plugin, bin)
 		if err != nil {
 			return err
 		}
 		fmt.Fprintf(out, "OpenCode: plugin %s at %s\n", verb(changed), plugin)
+		legacy := filepath.Join(home, ".config", "opencode", "plugin", "berth.js")
+		if old, err := os.ReadFile(legacy); err == nil && strings.HasPrefix(string(old), "// Installed by berth:") {
+			if err := os.WriteFile(legacy+".berth-backup", old, 0o600); err != nil {
+				return err
+			}
+			if err := os.Remove(legacy); err != nil {
+				return err
+			}
+		}
+		names, _ := SkillNames(nil)
+		if _, err := installSkillsIn(home, filepath.Join(".config", "opencode", "skills"), names, false); err != nil {
+			return err
+		}
+		fmt.Fprintf(out, "OpenCode: %d skills in %s\n", len(names), filepath.Join(home, ".config", "opencode", "skills"))
 	default:
 		return fmt.Errorf("unknown tool %q; use claude, cursor, codex, gemini, opencode, or all", tool)
 	}

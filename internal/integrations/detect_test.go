@@ -168,3 +168,29 @@ func ids(tools []Tool) string {
 	}
 	return strings.Join(s, " ")
 }
+
+func TestOpenCodeV1PluginIsRefreshedForV2(t *testing.T) {
+	home := t.TempDir()
+	tool, _ := ToolByID("opencode")
+	path := filepath.Join(home, ".config", "opencode", "plugin", "berth.js")
+	os.MkdirAll(filepath.Dir(path), 0o755)
+	os.WriteFile(path, []byte("// Installed by berth: hook opencode\nexport const BerthPlugin = async () => ({});\n"), 0o600)
+	if !tool.Hooked(home) || tool.Current(home) {
+		t.Fatal("V1 plugin was considered current")
+	}
+	if got := RefreshHooked(home, "/opt/berthd"); strings.Join(got, ",") != "opencode" || !tool.Current(home) {
+		t.Fatalf("refresh = %v", got)
+	}
+	if _, err := os.Stat(filepath.Join(home, ".config", "opencode", "skills", "berth", "SKILL.md")); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.Stat(path); !os.IsNotExist(err) {
+		t.Fatal("legacy plugin still loads")
+	}
+	if _, err := os.Stat(path + ".berth-backup"); err != nil {
+		t.Fatal(err)
+	}
+	if got := RefreshHooked(home, "/opt/berthd"); len(got) != 0 {
+		t.Fatalf("refreshed twice: %v", got)
+	}
+}

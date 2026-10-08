@@ -75,3 +75,27 @@ test("an agent that has written nothing yet doesn't stay reading", async ({ app 
   await expect(app.page.locator("[data-testid=pane]:visible")).toBeVisible();
   await expect(reading(app)).toHaveCount(0, { timeout: 5000 });
 });
+
+test("OpenCode messages and tools update in the native chat and accept a reply", async ({ app }) => {
+  agent.session = { agent: "opencode", preset: "opencode", command: "opencode mini --standalone", agent_state: "finished" };
+  let text = "I found the retry bug.";
+  agent.transcript = () => ({ body: {
+    source: "opencode", file: "ses_acme", gen: "ses_acme", reset: true, start: 0, next: 3, crew: [],
+    items: [
+      { kind: "user", id: "msg_user", text: "Fix the retry test" },
+      { kind: "tools", id: "msg_tools:0", verb: "Read", done: true, items: [{ id: "msg_tools:call_read", verb: "Read", target: "src/retry.ts", file: true }] },
+      { kind: "text", id: "msg_reply:0", text },
+    ],
+  } });
+  await openChat(app);
+  await expect(app.chat.getByText(text, { exact: true })).toBeVisible();
+  text = "I found the retry bug. Fixed it.";
+  agent.event({ type: "agent.finished", data: { session: SESSION, path: DIR, agent: "opencode" } });
+  await expect(app.chat.getByText(text, { exact: true })).toBeVisible();
+  await expect(app.chat.locator('[data-kind="text"]')).toHaveCount(1);
+  await expect(app.chat.getByRole("button", { name: /^Work(ed|ing)/ })).toBeVisible();
+  const reply = app.composer.getByRole("textbox", { name: "Reply" });
+  await reply.fill("Add a regression test");
+  await reply.press("Enter");
+  await expect.poll(() => agent.sends.some((s) => s.text === "Add a regression test")).toBe(true);
+});

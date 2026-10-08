@@ -128,7 +128,7 @@ func TestNewAgentHooksInstallOnceAndKeepOtherSettings(t *testing.T) {
 		t.Fatal("plugin rewritten unchanged")
 	}
 	b, _ = os.ReadFile(plugin)
-	if !strings.Contains(string(b), `"/opt/berthd"} hook opencode`) {
+	if !strings.Contains(string(b), `execFile("/opt/berthd", ["hook", "opencode"`) {
 		t.Fatalf("plugin = %s", b)
 	}
 	claude := filepath.Join(dir, "claude.json")

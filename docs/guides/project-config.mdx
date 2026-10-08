@@ -168,7 +168,8 @@ Shipyard passes them with each CLI's own flags, checked against its `--help`:
 |---|---|---|---|
 | `claude` | `--model` | `--effort` (low, medium, high, xhigh, max) | `opus`, `sonnet`, `haiku` (Claude Code's aliases for the latest of each) |
 | `codex` | `--model` | `-c model_reasoning_effort=` (minimal, low, medium, high) | none: Codex's default |
-| `opencode`, `cursor` | `--model` | none | none |
+| `opencode` | `mini --standalone --model` (OpenCode 2) | none | none: OpenCode's configured default |
+| `cursor` | `--model` | none | none |
 
 Unset means the CLI's default. A value must be a plain name (letters,
 digits, `.` `_` `:` `/` `-`); anything else is refused, so nothing reaches a

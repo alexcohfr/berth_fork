@@ -112,6 +112,17 @@ func TestAgentCommandsPassAModelAndAnEffort(t *testing.T) {
 	if got, err := AgentCommandWith(codex, "", "gpt-5-codex", "low"); err != nil || got != "codex --model gpt-5-codex -c model_reasoning_effort=low" {
 		t.Fatalf("codex = %q, %v", got, err)
 	}
+	opencode, _ := presetFor(nil, "opencode")
+	if got, err := AgentCommandWith(opencode, "fix the user's bug", "acme/model", ""); err != nil || got != `opencode mini --standalone --model acme/model --prompt 'fix the user'\''s bug'` {
+		t.Fatalf("opencode = %q, %v", got, err)
+	}
+	if got := AgentCommand(opencode, ""); got != "opencode mini --standalone" || agentOf(got) != "opencode" {
+		t.Fatalf("opencode without a prompt = %q", got)
+	}
+	opencode.Command = "opencode --server http://localhost:4096"
+	if got := AgentCommand(opencode, ""); got != opencode.Command {
+		t.Fatalf("overrode a custom OpenCode command: %q", got)
+	}
 	if got, _ := AgentCommandWith(claude, "hi", "", ""); got != "claude 'hi'" {
 		t.Fatalf("the defaults added flags: %q", got)
 	}

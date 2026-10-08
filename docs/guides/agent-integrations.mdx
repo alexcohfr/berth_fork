@@ -42,8 +42,37 @@ with the command that installs them.
   change yourself.
 - **Gemini CLI**: `SessionStart` / `BeforeAgent` / `Notification` /
   `AfterAgent` / `SessionEnd` hooks in `~/.gemini/settings.json`.
-- **OpenCode**: a small plugin, `~/.config/opencode/plugin/berth.js`, that
-  runs the hook when a session gets busy, asks for a permission, or goes idle.
+- **OpenCode 2**: a small plugin, `~/.config/opencode/plugins/berth.js`, that
+  reports session creation, turn starts, permissions, question forms and
+  completed turns. Also installs Shipyard's skills in
+  `~/.config/opencode/skills/`.
+
+### OpenCode 2
+
+```sh
+berthd integrations install opencode
+```
+
+This replaces Shipyard's old V1 plugin with the V2 implementation. Restart
+existing OpenCode terminals after updating the integration; new sessions
+use `opencode mini --standalone`. The old Shipyard file in `plugin/` is
+backed up and removed after the V2 file is installed in `plugins/`.
+
+The private server preserves each terminal's `BERTH_SESSION` and worktree
+environment. The plugin filters out other locations and child-session
+completion events, so a helper finishing does not finish its parent's turn.
+It stays inactive in an ordinary shared OpenCode service.
+
+Native chat reads OpenCode's public V2 API through
+`opencode api --standalone`, using the exact session ID reported by the
+plugin. It shows the latest 100 messages and fetches tool details on demand.
+It does not query OpenCode's database schema, copy transcripts into
+Shipyard's event journal, or send reasoning and tool output in the normal
+chat feed. Messages remain readable after the terminal exits. Earlier
+messages, permissions and question forms are available in OpenCode's terminal.
+
+The plugin and native chat require OpenCode 2. Custom presets that connect
+to another server need their own session integration.
 
 ### Every account
 

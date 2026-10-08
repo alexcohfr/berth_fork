@@ -39,7 +39,8 @@ var Tools = []Tool{
 	{ID: "gemini", Name: "Gemini CLI", Command: "gemini", configDir: ".gemini",
 		hookFile: filepath.Join(".gemini", "settings.json"), hookMarker: "hook gemini AfterAgent"},
 	{ID: "opencode", Name: "OpenCode", Command: "opencode", configDir: filepath.Join(".config", "opencode"),
-		hookFile: filepath.Join(".config", "opencode", "plugin", "berth.js"), hookMarker: "hook opencode"},
+		hookFile: filepath.Join(".config", "opencode", "plugins", "berth.js"), hookMarker: "hook opencode",
+		currentMarker: "hook opencode (V2)"},
 }
 
 // ToolByID finds a tool by its ID.
@@ -79,6 +80,9 @@ func (t Tool) Hooked(home string) bool {
 		return hooked
 	}
 	b, err := os.ReadFile(filepath.Join(home, t.hookFile))
+	if os.IsNotExist(err) && t.ID == "opencode" {
+		b, err = os.ReadFile(filepath.Join(home, ".config", "opencode", "plugin", "berth.js"))
+	}
 	return err == nil && bytes.Contains(b, []byte(t.hookMarker))
 }
 

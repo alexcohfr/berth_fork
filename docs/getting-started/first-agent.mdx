@@ -60,12 +60,39 @@ The built-in agents, offered when their command is installed on the box:
 | --- | --- | --- |
 | `claude` | Claude Code | `claude` |
 | `codex` | Codex | `codex` |
-| `opencode` | OpenCode | `opencode --prompt …` |
+| `opencode` | OpenCode 2 | `opencode mini --standalone --prompt …` |
 | `gemini` | Gemini CLI | `gemini -i …` |
 | `cursor` | Cursor Agent | `cursor-agent` |
 
 A repository can add its own or replace these in
 [`.berth/config.json`](/reference/config#agents).
+
+### Using OpenCode
+
+Install and sign in to OpenCode 2 on the machine that runs your agents, then
+install Shipyard's integration there:
+
+```sh
+berthd integrations install opencode
+```
+
+Choose **OpenCode** in the app's agent picker, or start a task from the CLI:
+
+```sh
+berth task new my-box/app/fix-login --agent opencode --prompt "Fix the login redirect"
+```
+
+The conversation view shows OpenCode's messages and tool calls; expanding a
+call reads its command, output or edit. Reply from the composer, or switch
+to the terminal to use OpenCode directly. Permissions and question forms
+can be answered in the terminal. The native chat shows the latest 100
+messages; earlier messages remain in OpenCode.
+
+Shipyard uses OpenCode's Mini interface with a private server per terminal,
+so each agent inherits its own worktree environment and session identity.
+Your configured OpenCode model is used unless you choose another model.
+Claude Code and Codex are not required. See
+[OpenCode's integration](/guides/agent-integrations#opencode-2) for upgrades.
 
 ### In the app
 

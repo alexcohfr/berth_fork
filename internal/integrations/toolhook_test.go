@@ -142,12 +142,19 @@ func TestEveryAgentAdapterMapsItsTurn(t *testing.T) {
 		{"gemini", "Notification", `{"cwd":"/w","notification_type":"ToolPermission"}`, "agent.waiting"},
 		{"gemini", "AfterAgent", `{"cwd":"/w"}`, "agent.finished"},
 		{"opencode", "session.busy", `{"cwd":"/w","session_id":"o"}`, "agent.started"},
+		{"opencode", "session.created", `{"cwd":"/w","session_id":"o"}`, "agent.ready"},
+		{"opencode", "form.created", `{"cwd":"/w","session_id":"o"}`, "agent.waiting"},
+		{"opencode", "form.replied", `{"cwd":"/w","session_id":"o"}`, "agent.started"},
 		{"opencode", "permission.updated", `{"cwd":"/w"}`, "agent.waiting"},
 		{"opencode", "session.idle", `{"cwd":"/w"}`, "agent.finished"},
+		{"opencode", "session.error", `{"cwd":"/w"}`, "agent.finished"},
 	} {
 		e, ok := Translate(tc[0], tc[1], []byte(tc[2]))
 		if !ok || e.Type != tc[3] || e.Data["path"] != "/w" {
 			t.Errorf("%s %s = %+v %v, want %s", tc[0], tc[1], e, ok, tc[3])
+		}
+		if tc[1] == "session.error" && e.Data["status"] != "error" {
+			t.Errorf("failed OpenCode turn lost its error status: %+v", e)
 		}
 	}
 }

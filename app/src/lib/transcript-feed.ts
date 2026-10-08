@@ -19,7 +19,7 @@ import type { Artifact, CrewMember, TranscriptItem } from "@/lib/transcript";
 // step); never while hidden.
 
 export interface TranscriptResult {
-  source: "claude" | "codex" | "none";
+  source: "claude" | "codex" | "opencode" | "none";
   items: TranscriptItem[];
   next: number;
   crew: CrewMember[];
