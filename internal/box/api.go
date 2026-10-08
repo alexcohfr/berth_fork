@@ -218,6 +218,7 @@ func (b *Box) Mount(s *wire.Server) {
 	route("GET /v1/doctor", b.handleDoctor)
 	route("GET /v1/requirements", b.requirements)
 	route("GET /v1/agents", b.listAgentCLIs)
+	route("GET /v1/agents/opencode/models", b.openCodeModels)
 	route("POST /v1/agents/install", b.installAgentCLIs)
 	route("POST /v1/agents/refresh", b.lookAgainForAgents)
 	route("POST /v1/upgrade", b.handleUpgrade)

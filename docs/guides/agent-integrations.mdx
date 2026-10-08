@@ -58,6 +58,18 @@ existing OpenCode terminals after updating the integration; new sessions
 use `opencode mini --standalone`. The old Shipyard file in `plugin/` is
 backed up and removed after the V2 file is installed in `plugins/`.
 
+Before starting a task, open the agent picker, then **OpenCode** to choose
+an enabled model and, when offered, its reasoning variant. **Default** keeps
+OpenCode's configured choice. The list is read from OpenCode's shared service
+on that box for the selected project or worktree; the launched Mini still
+uses its own private server. Custom presets keep their configured model lists.
+Models are grouped in collapsible provider sections; click a provider to
+expand or collapse it. Open sections stay open during refreshes.
+The list refreshes on opening the picker,
+every 30 seconds while it is visible, and when returning to the app.
+Use **Refresh models** to fetch changes immediately; a failed refresh keeps
+the last loaded list and offers a retry.
+
 The private server preserves each terminal's `BERTH_SESSION` and worktree
 environment. The plugin filters out other locations and child-session
 completion events, so a helper finishing does not finish its parent's turn.

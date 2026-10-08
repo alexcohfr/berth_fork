@@ -11,6 +11,7 @@ import (
 	"os"
 	"os/exec"
 	"regexp"
+	"sort"
 	"strings"
 	"time"
 
@@ -19,6 +20,48 @@ import (
 
 var openCodeID = regexp.MustCompile(`^ses[A-Za-z0-9_-]{1,120}$`)
 var openCodeMessageID = regexp.MustCompile(`^msg_[A-Za-z0-9_-]{1,120}$`)
+
+type openCodeModel struct {
+	ID       string   `json:"id"`
+	Name     string   `json:"name"`
+	Variants []string `json:"variants"`
+}
+
+func (b *Box) openCodeModels(w http.ResponseWriter, r *http.Request) error {
+	dir, err := b.Locations.Dir(r.Context(), r.URL.Query().Get("at"))
+	if err != nil {
+		return err
+	}
+	var page struct {
+		Data []struct {
+			ID, ProviderID, Name string
+			Enabled              bool
+			Variants             []struct{ ID string }
+		} `json:"data"`
+	}
+	// Catalog plugins live in the shared service. A one-shot standalone API
+	// process exits before they finish populating model.list in OpenCode 2.
+	if err := openCodeAPI(r.Context(), dir, b.envForDir(r.Context(), dir), []string{"model.list", "--param", "location[directory]=" + dir}, &page); err != nil {
+		return err
+	}
+	models := []openCodeModel{}
+	for _, m := range page.Data {
+		id := m.ProviderID + "/" + m.ID
+		if !m.Enabled || !modelWord.MatchString(id) || strings.HasPrefix(id, "-") {
+			continue
+		}
+		item := openCodeModel{ID: id, Name: m.Name, Variants: []string{}}
+		for _, v := range m.Variants {
+			if modelWord.MatchString(v.ID) {
+				item.Variants = append(item.Variants, v.ID)
+			}
+		}
+		models = append(models, item)
+	}
+	sort.SliceStable(models, func(i, j int) bool { return models[i].ID < models[j].ID })
+	writeJSON(w, models)
+	return nil
+}
 
 func (b *Box) openCodeSession(sess Session) string {
 	if b.Turns != nil {
@@ -82,24 +125,30 @@ func (b *Box) openCodeToolDetail(w http.ResponseWriter, r *http.Request, sess Se
 // durable sessions without starting, reconfiguring or depending on the user's
 // shared service. It also works after the original terminal has exited.
 func (b *Box) openCodeRead(ctx context.Context, sess Session, args []string, out any) error {
+	var env []string
+	// These select the same store as the terminal, including project overrides.
+	for _, key := range []string{"HOME", "XDG_CONFIG_HOME", "XDG_DATA_HOME", "XDG_STATE_HOME", "OPENCODE_DB", "OPENCODE_CONFIG_DIR"} {
+		if value := b.Sessions.EnvVar(ctx, sess, key); value != "" {
+			env = append(env, key+"="+value)
+		}
+	}
+	return openCodeAPI(ctx, sess.Dir, env, append([]string{"--standalone"}, args...), out)
+}
+
+func openCodeAPI(ctx context.Context, dir string, env, args []string, out any) error {
 	found, ok := agentFound("opencode")
 	if !ok {
 		return errors.New("OpenCode is not installed on this box")
 	}
 	ctx, cancel := context.WithTimeout(ctx, 8*time.Second)
 	defer cancel()
-	cmd := exec.CommandContext(ctx, found.Path, append([]string{"api", "--standalone"}, args...)...)
-	cmd.Dir = sess.Dir
+	cmd := exec.CommandContext(ctx, found.Path, append([]string{"api"}, args...)...)
+	cmd.Dir = dir
 	cmd.Env = os.Environ()
 	if found.PATH != "" {
 		cmd.Env = append(cmd.Env, "PATH="+found.PATH)
 	}
-	// These select the same store as the terminal, including project overrides.
-	for _, key := range []string{"HOME", "XDG_CONFIG_HOME", "XDG_DATA_HOME", "XDG_STATE_HOME", "OPENCODE_DB", "OPENCODE_CONFIG_DIR"} {
-		if value := b.Sessions.EnvVar(ctx, sess, key); value != "" {
-			cmd.Env = append(cmd.Env, key+"="+value)
-		}
-	}
+	cmd.Env = append(cmd.Env, env...)
 	cmd.Env = append(cmd.Env, "BERTH_SESSION=", "BERTH_AGENT=")
 	var buf bytes.Buffer
 	cmd.Stdout = &openCodeOutput{Buffer: &buf, remaining: 16 << 20}

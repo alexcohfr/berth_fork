@@ -609,6 +609,8 @@ function StartBody({ draft, text, setText, tabs, fixed, dialog, autoFocus, place
           {(!pinned || from?.kind === "handoff") && !attempts && <Pick label="Where" icon={<GitBranchIcon />} value={where} options={whereOptions} onPick={(v) => setWhere(v as "new" | "main" | "here")} />}
           <div className="ml-auto flex min-w-0 items-center gap-1">
             <AgentsPicker
+              box={box}
+              at={where === "here" && pinned ? pinned.at : locName}
               presets={presets}
               sel={sel}
               copies={copies}

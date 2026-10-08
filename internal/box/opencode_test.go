@@ -67,6 +67,43 @@ func TestOpenCodeChatReadsItsLinkedSessionThroughTheAPI(t *testing.T) {
 	}
 }
 
+func TestOpenCodeModelsUseTheProjectAndOnlyExposeEnabledChoices(t *testing.T) {
+	dir := t.TempDir()
+	bin := filepath.Join(dir, "opencode")
+	script := `#!/bin/sh
+[ "$1 $2" = 'api model.list' ] || exit 3
+[ "$3" = --param ] && [ "$4" = "location[directory]=$PWD" ] || exit 4
+[ -z "$BERTH_SESSION" ] && [ -z "$BERTH_AGENT" ] || exit 5
+[ "$ACME_MODEL_ENV" = project ] || exit 6
+cat <<'JSON'
+{"data":[{"id":"coder","providerID":"acme","name":"Acme Coder","enabled":true,"headers":{"Authorization":"must-not-leak"},"variants":[{"id":"high","settings":{"apiKey":"must-not-leak"}},{"id":"bad;id"}]},{"id":"hidden","providerID":"acme","enabled":false},{"id":"bad;id","providerID":"acme","enabled":true}]}
+JSON
+`
+	if err := os.WriteFile(bin, []byte(script), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("PATH", dir+":"+os.Getenv("PATH"))
+	t.Setenv("BERTH_SESSION", "another-session")
+	t.Setenv("BERTH_AGENT", "opencode")
+	c, _ := servedBox(t)
+	repo := gitRepo(t)
+	call(t, c, "POST", "/v1/locations", "", map[string]string{"name": "acme", "path": repo}, nil)
+	if status := call(t, c, "PUT", "/v1/locations/acme/config", "", map[string]any{"local": RepoConfig{Env: map[string]string{"ACME_MODEL_ENV": "project"}}}, nil); status != 200 {
+		t.Fatalf("config status = %d", status)
+	}
+	var got []map[string]any
+	if status := call(t, c, "GET", "/v1/agents/opencode/models?at=acme", "", nil, &got); status != 200 {
+		t.Fatalf("models status = %d", status)
+	}
+	data, _ := json.Marshal(got)
+	if string(data) != `[{"id":"acme/coder","name":"Acme Coder","variants":["high"]}]` {
+		t.Fatalf("models = %s", data)
+	}
+	if status := call(t, c, "GET", "/v1/agents/opencode/models?at=missing", "", nil, nil); status == 200 {
+		t.Fatal("accepted an unknown project")
+	}
+}
+
 // Opt-in contract check against an installed OpenCode V2, with an entirely
 // isolated home/store and a localhost model stub. No paid model requests.
 func TestOpenCodeLiveV2Contract(t *testing.T) {
@@ -108,7 +145,7 @@ func TestOpenCodeLiveV2Contract(t *testing.T) {
 	}))
 	defer model.Close()
 	t.Setenv("ACME_API_KEY", "synthetic")
-	config := fmt.Sprintf(`{"model":"acme/model","enabled_providers":["acme"],"providers":{"acme":{"env":["ACME_API_KEY"],"package":"@opencode/ai/providers/openai-compatible","settings":{"baseURL":%q},"models":{"model":{}}}}}`, model.URL+"/v1")
+	config := fmt.Sprintf(`{"model":"acme/model","enabled_providers":["acme"],"providers":{"acme":{"env":["ACME_API_KEY"],"package":"@opencode/ai/providers/openai-compatible","settings":{"baseURL":%q},"models":{"model":{"variants":[{"id":"high","settings":{}}]}}}}}`, model.URL+"/v1")
 	if err := os.WriteFile(filepath.Join(project, "opencode.json"), []byte(config), 0o600); err != nil {
 		t.Fatal(err)
 	}
@@ -128,7 +165,7 @@ func TestOpenCodeLiveV2Contract(t *testing.T) {
 		return out
 	}
 	s := testSessions(t)
-	command, err := AgentCommandWith(AgentPreset{ID: "opencode", Command: "opencode", PromptFlag: "--prompt", ModelFlag: "--model"}, "Reply with the smoke response", "acme/model", "")
+	command, err := AgentCommandWith(AgentPreset{ID: "opencode", Command: "opencode", PromptFlag: "--prompt", ModelFlag: "--model"}, "Reply with the smoke response", "acme/model#high", "")
 	if err != nil {
 		t.Fatal(err)
 	}

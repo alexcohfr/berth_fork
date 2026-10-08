@@ -1,5 +1,5 @@
-import { BookMarkedIcon, ChevronsUpDownIcon, CloudOffIcon, FolderPlusIcon, PinIcon, UsersIcon } from "lucide-react";
-import { useEffect } from "react";
+import { BookMarkedIcon, ChevronDownIcon, ChevronRightIcon, ChevronsUpDownIcon, CloudOffIcon, FolderPlusIcon, PinIcon, UsersIcon } from "lucide-react";
+import { useEffect, useId, useState } from "react";
 
 import { AgentIcon, StateGlyph } from "@/components/agent-glyph";
 import { Tip } from "@/components/tip";
@@ -26,6 +26,8 @@ import { sessionAgent, sessionName, sessionPlace } from "@/lib/derive";
 import { promptsFor, usePrompts } from "@/lib/prompts";
 import { useStore } from "@/lib/store";
 import { cn } from "@/lib/utils";
+import { errorMessage } from "@/lib/format";
+import { poll } from "@/lib/poll";
 
 // The composer's pickers: where (project, box, worktree or main checkout),
 // which agents (with their models and efforts, and how many of each), the
@@ -34,6 +36,8 @@ import { cn } from "@/lib/utils";
 // What the agents picker holds: per agent, its models (each one attempt; ""
 // the default) and one effort.
 export type Chosen = Record<string, { models: string[]; effort: string }>;
+type OpenCodeModel = { id: string; name: string; variants: string[] };
+const PROVIDER_NAMES: Record<string, string> = { openai: "OpenAI", opencode: "OpenCode", anthropic: "Anthropic" };
 
 export const expand = (sel: Chosen, copies: number): AgentPick[] =>
   Object.entries(sel).flatMap(([agent, c]) => c.models.flatMap((model) => Array.from({ length: copies }, () => ({ agent, model, effort: c.effort }))));
@@ -85,6 +89,8 @@ const Tick = ({ on }: { on: boolean }) => (
 // model against another, or ×2 of the same, are attempts. single keeps it
 // to one (a hand-off, a review); allowNone offers the worktree alone.
 export function AgentsPicker({
+  box,
+  at,
   presets,
   sel,
   copies,
@@ -95,6 +101,8 @@ export function AgentsPicker({
   onCopies,
   onNone,
 }: {
+  box: string;
+  at: string;
   presets: AgentPreset[];
   sel: Chosen;
   copies: number;
@@ -105,6 +113,36 @@ export function AgentsPicker({
   onCopies(n: number): void;
   onNone?(on: boolean): void;
 }) {
+  const client = useStore((s) => s.client);
+  const [open, setOpen] = useState(false);
+  const [retry, setRetry] = useState(0);
+  const providerGroupID = useId();
+  const [expandedProviders, setExpandedProviders] = useState<Set<string>>(() => new Set());
+  const [catalog, setCatalog] = useState<{ key: string; models?: OpenCodeModel[]; error?: string; loading?: boolean }>();
+  const catalogKey = `${box}/${at}`;
+  const hasOpenCode = presets.some((p) => p.id === "opencode" && p.command === "opencode" && p.model_flag && !p.models);
+  useEffect(() => {
+    if (!open || !client || !box || !at || !hasOpenCode) return;
+    let disposed = false;
+    const watcher = poll(async () => {
+      setCatalog((prev) => ({ ...(prev?.key === catalogKey ? prev : {}), key: catalogKey, loading: true }));
+      try {
+        const models = await client.box<OpenCodeModel[]>(box, "GET", `agents/opencode/models?at=${encodeURIComponent(at)}`);
+        if (!disposed) setCatalog({ key: catalogKey, models });
+      } catch (err) {
+        if (!disposed) setCatalog((prev) => ({ ...prev, key: catalogKey, loading: false, error: errorMessage(err) }));
+      }
+    }, { every: 30_000 });
+    return () => { disposed = true; watcher.stop(); };
+  }, [open, client, box, at, catalogKey, hasOpenCode, retry]);
+  const available = catalog?.key === catalogKey ? catalog : undefined;
+  const providers = new Map<string, OpenCodeModel[]>();
+  for (const model of available?.models ?? []) {
+    const provider = model.id.split("/")[0];
+    const choices = providers.get(provider) ?? [];
+    choices.push(model);
+    providers.set(provider, choices);
+  }
   const label = none ? "No agent" : pickLabel(sel, copies, presets);
   const ids = none ? [] : Object.keys(sel);
   // Unticking the last pick leaves it: there is always one agent, unless
@@ -121,7 +159,7 @@ export function AgentsPicker({
     if (Object.keys(out).length) onChange(out);
   };
   return (
-    <Menu>
+    <Menu onOpenChange={setOpen}>
       <MenuTrigger render={<Button size="sm" variant="ghost" aria-label={`Agents: ${label}`} className="min-w-0 max-w-60 shrink" />}>
         {ids.length > 0 && (
           <span className="flex shrink-0 gap-0.5">
@@ -141,7 +179,8 @@ export function AgentsPicker({
             const c = none ? undefined : sel[p.id];
             const models = p.model_flag ? (p.models ?? []) : [];
             const efforts = p.effort_flag ? (p.efforts ?? []) : [];
-            if (!models.length && !efforts.length) {
+            const dynamic = p.id === "opencode" && p.command === "opencode" && !!p.model_flag && !p.models;
+            if (!models.length && !efforts.length && !dynamic) {
               return (
                 <MenuCheckboxItem key={p.id} checked={!!c} onCheckedChange={(on) => set(p.id, on ? { models: [""], effort: "" } : undefined)}>
                   <span className="flex items-center gap-2">
@@ -152,24 +191,69 @@ export function AgentsPicker({
               );
             }
             const cur = c ?? { models: [], effort: "" };
-            const toggle = (m: string, on: boolean) => set(p.id, { ...cur, models: on ? [...cur.models.filter((x) => x !== m), m] : cur.models.filter((x) => x !== m) });
+            const toggle = (m: string, on: boolean) => set(p.id, { ...cur, models: on ? [...cur.models.filter((x) => x !== m && (!dynamic || (x !== "" && m !== ""))), m] : cur.models.filter((x) => x !== m) });
             return (
               <MenuSub key={p.id}>
                 <MenuSubTrigger className="gap-2 ps-2">
                   <Tick on={!!c} />
                   <AgentIcon agent={p.id} />
                   <span className="flex-1">{p.name}</span>
-                  {c && <span className="text-muted-foreground text-xs">{[...c.models.map((m) => (m ? nice(m) : "Default")), c.effort && nice(c.effort)].filter(Boolean).join(", ")}</span>}
+                  {c && <span className="max-w-48 truncate text-muted-foreground text-xs">{[...c.models.map((m) => (m ? nice(m) : "Default")), c.effort && nice(c.effort)].filter(Boolean).join(", ")}</span>}
                 </MenuSubTrigger>
-                <MenuSubPopup className="min-w-44">
+                <MenuSubPopup className="min-w-44 max-w-[min(32rem,90vw)]">
                   <MenuGroup>
-                    <MenuGroupLabel>Model</MenuGroupLabel>
+                    <MenuGroupLabel>{dynamic ? "Model · auto-refresh" : "Model"}</MenuGroupLabel>
+                    {dynamic && <MenuItem disabled={available?.loading} closeOnClick={false} onClick={() => setRetry((n) => n + 1)}>{available?.loading ? "Refreshing models…" : available?.error ? "Retry loading models" : "Refresh models"}</MenuItem>}
                     {["", ...models].map((m) => (
                       <MenuCheckboxItem key={m || "default"} checked={cur.models.includes(m)} onCheckedChange={(on) => toggle(m, on)}>
                         {m ? nice(m) : "Default"}
                       </MenuCheckboxItem>
                     ))}
+                    {dynamic && !available?.models && !available?.error && <MenuItem disabled>Loading models…</MenuItem>}
+                    {dynamic && available?.error && <p role="alert" className="max-w-72 px-2 py-1.5 text-xs text-muted-foreground">{available.models ? "Couldn't refresh. Showing the last loaded models. " : ""}{available.error}</p>}
+                    {dynamic && available?.models?.length === 0 && <MenuItem disabled>No enabled models. Connect a provider in OpenCode.</MenuItem>}
                   </MenuGroup>
+                  {dynamic && [...providers].map(([provider, choices]) => {
+                    const expanded = expandedProviders.has(provider);
+                    const groupID = `${providerGroupID}-${provider}`;
+                    const name = PROVIDER_NAMES[provider] ?? nice(provider);
+                    return (
+                    <MenuGroup key={provider}>
+                      <MenuItem className="gap-2 ps-2" aria-label={name} aria-expanded={expanded} aria-controls={expanded ? groupID : undefined} closeOnClick={false} onClick={() => setExpandedProviders((prev) => {
+                        const next = new Set(prev);
+                        if (next.has(provider)) next.delete(provider);
+                        else next.add(provider);
+                        return next;
+                      })}>
+                        {expanded ? <ChevronDownIcon className="size-3" /> : <ChevronRightIcon className="size-3" />}
+                        <span className="flex-1">{name}</span>
+                        <Tick on={cur.models.some((id) => id.startsWith(`${provider}/`))} />
+                        <span className="text-muted-foreground text-xs">{choices.length}</span>
+                      </MenuItem>
+                      {expanded && <MenuGroup id={groupID} aria-label={name} className="ps-3">
+                          {choices.map((m) => m.variants.length ? (
+                            <MenuSub key={m.id}>
+                              <MenuSubTrigger className="gap-2 ps-2" aria-label={m.id}>
+                                <Tick on={cur.models.some((id) => id === m.id || id.startsWith(`${m.id}#`))} />
+                                <span className="truncate">{m.id.slice(provider.length + 1)}</span>
+                              </MenuSubTrigger>
+                              <MenuSubPopup>
+                                <MenuGroup>
+                                  <MenuGroupLabel>{m.name || m.id} · Variant</MenuGroupLabel>
+                                  {["", ...m.variants].map((v) => {
+                                    const id = m.id + (v ? `#${v}` : "");
+                                    return <MenuCheckboxItem key={id} checked={cur.models.includes(id)} onCheckedChange={(on) => toggle(id, on)}>{v ? nice(v) : "Default"}</MenuCheckboxItem>;
+                                  })}
+                                </MenuGroup>
+                              </MenuSubPopup>
+                            </MenuSub>
+                          ) : (
+                            <MenuCheckboxItem key={m.id} aria-label={m.id} checked={cur.models.includes(m.id)} onCheckedChange={(on) => toggle(m.id, on)}>{m.id.slice(provider.length + 1)}</MenuCheckboxItem>
+                          ))}
+                      </MenuGroup>}
+                    </MenuGroup>
+                    );
+                  })}
                   {efforts.length > 0 && (
                     <>
                       <MenuSeparator />

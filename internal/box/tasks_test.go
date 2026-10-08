@@ -119,6 +119,14 @@ func TestAgentCommandsPassAModelAndAnEffort(t *testing.T) {
 	if got := AgentCommand(opencode, ""); got != "opencode mini --standalone" || agentOf(got) != "opencode" {
 		t.Fatalf("opencode without a prompt = %q", got)
 	}
+	if got, err := AgentCommandWith(opencode, "", "acme/model#high", ""); err != nil || got != "opencode mini --standalone --model 'acme/model#high'" {
+		t.Fatalf("opencode variant = %q, %v", got, err)
+	}
+	for _, bad := range []string{"acme/model#high;id", "acme/model#high$(id)", "#high", "acme/model#", "acme/model#high#low"} {
+		if _, err := AgentCommandWith(opencode, "", bad, ""); err == nil {
+			t.Fatalf("accepted invalid model variant %q", bad)
+		}
+	}
 	opencode.Command = "opencode --server http://localhost:4096"
 	if got := AgentCommand(opencode, ""); got != opencode.Command {
 		t.Fatalf("overrode a custom OpenCode command: %q", got)

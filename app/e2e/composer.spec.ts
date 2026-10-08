@@ -1,9 +1,73 @@
 import { expect, mockOnly, test } from "./fixtures";
+import { fakeAgent } from "./fake-agent";
 
 // The reply box at the foot of a chat.
 
 test.beforeEach(async ({ app }) => {
   await app.open({ params: { view: "conversation" } });
+});
+
+test("OpenCode providers collapse, stay open through refresh, and launch the selected variant", async ({ app, page }) => {
+  mockOnly();
+  const agent = await fakeAgent();
+  try {
+    await page.route(`${agent.url}/v1/boxes/devl/api/info`, (route) => route.fulfill({ json: {
+      name: "devl", version: "dev", tools: ["opencode"], capabilities: [],
+      agents: [{ id: "opencode", name: "OpenCode", command: "opencode", model_flag: "--model" }],
+    } }));
+    let attempts = 0;
+    const models = [{ id: "acme/coder", name: "Acme Coder", variants: ["low", "high"] }];
+    await page.route(`${agent.url}/v1/boxes/devl/api/agents/opencode/models?*`, (route) => {
+      expect(new URL(route.request().url()).searchParams.get("at")).toBe("shop");
+      return ++attempts === 1
+        ? route.fulfill({ status: 503, json: { error: "Catalog temporarily unavailable" } })
+        : route.fulfill({ json: models });
+    });
+    let launched: Record<string, unknown> | undefined;
+    await page.route(`${agent.url}/v1/boxes/devl/api/tasks`, (route) => {
+      launched = route.request().postDataJSON();
+      return route.fulfill({ status: 400, json: { error: "Test stopped before launch" } });
+    });
+    await page.clock.install();
+    await app.open({ agent });
+    const composer = page.getByTestId("task-composer");
+    await composer.getByRole("button", { name: "Agents: OpenCode", exact: true }).click();
+    await page.getByRole("menuitem", { name: /^OpenCode/ }).hover();
+    await expect(page.getByRole("alert").filter({ hasText: "Catalog temporarily unavailable" })).toBeVisible();
+    await page.getByRole("menuitem", { name: "Retry loading models" }).click();
+    const provider = page.getByRole("menuitem", { name: "Acme", exact: true });
+    await expect(provider).toHaveAttribute("aria-expanded", "false");
+    await expect(page.getByRole("menuitem", { name: "acme/coder", exact: true })).toHaveCount(0);
+    await provider.click();
+    await expect(provider).toHaveAttribute("aria-expanded", "true");
+    models.push({ id: "second/coder", name: "Second Coder", variants: [] });
+    await page.clock.fastForward(30_100);
+    await expect(page.getByRole("menuitem", { name: "Second", exact: true })).toBeVisible();
+    models.push({ id: "third/coder", name: "Third Coder", variants: [] });
+    await page.getByRole("menuitem", { name: "Refresh models", exact: true }).click();
+    await expect(page.getByRole("menuitem", { name: "Third", exact: true })).toBeVisible();
+    await expect(provider).toHaveAttribute("aria-expanded", "true");
+    await provider.click();
+    await expect(provider).toHaveAttribute("aria-expanded", "false");
+    await expect(page.getByRole("menuitem", { name: "acme/coder", exact: true })).toHaveCount(0);
+    await provider.press("Enter");
+    await expect(provider).toHaveAttribute("aria-expanded", "true");
+    await page.getByRole("group", { name: "Acme", exact: true }).getByRole("menuitem", { name: "acme/coder", exact: true }).hover();
+    await page.getByRole("menuitemcheckbox", { name: "High", exact: true }).click();
+    await page.keyboard.press("Escape");
+    await page.keyboard.press("Escape");
+    await page.keyboard.press("Escape");
+    await page.keyboard.press("Escape");
+    await expect(composer.getByRole("button", { name: "Agents: OpenCode · acme/coder#high", exact: true })).toBeVisible();
+    const closedCalls = attempts;
+    await page.clock.fastForward(60_100);
+    expect(attempts).toBe(closedCalls);
+    await composer.getByRole("textbox", { name: "What should your agents work on?" }).fill("Check the retry logic");
+    await composer.getByRole("button", { name: "Start", exact: true }).click();
+    await expect.poll(() => launched).toMatchObject({ agent: "opencode", model: "acme/coder#high", location: "shop" });
+  } finally {
+    await agent.close();
+  }
 });
 
 test("a long reply is capped in height and scrolls, with Send in reach", async ({ app }) => {

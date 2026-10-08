@@ -113,6 +113,7 @@ func AgentCommand(p AgentPreset, prompt string) string {
 // modelWord is what a model or effort may be: a CLI's name for one, never
 // anything a shell would read as more than one word.
 var modelWord = regexp.MustCompile(`^[A-Za-z0-9._:/-]+$`)
+var openCodeModelWord = regexp.MustCompile(`^[A-Za-z0-9._:/-]+(?:#[A-Za-z0-9._:/-]+)?$`)
 
 // AgentCommandWith is the command line that starts p with a first prompt, a
 // model and an effort; empty means the CLI's default. A value that is not a
@@ -125,11 +126,15 @@ func AgentCommandWith(p AgentPreset, prompt, model, effort string) (string, erro
 		cmd += " mini --standalone"
 	}
 	if model != "" {
-		if !modelWord.MatchString(model) || strings.HasPrefix(model, "-") {
+		valid := modelWord.MatchString(model) || (p.ID == "opencode" && openCodeModelWord.MatchString(model))
+		if !valid || strings.HasPrefix(model, "-") {
 			return "", badRequest("%q is not a model name", model)
 		}
 		if p.ModelFlag == "" {
 			return "", badRequest("berth does not know how to pick a model for %s", p.Name)
+		}
+		if strings.Contains(model, "#") {
+			model = shellQuote(model)
 		}
 		cmd += " " + p.ModelFlag + " " + model
 	}
