@@ -378,3 +378,48 @@ Directions écartées : réécrire les prompts/outils OpenCode dans Shipyard ; a
 À chaque montée de version OpenCode : rejouer le contrat runtime, l’idempotence d’admission, les schémas de formulaires, la pagination et l’invalidation après revert. Les événements restent un accélérateur d’affichage ; l’état durable relu reste l’arbitre après une coupure.
 
 En revue, porter l’attention sur l’identité runtime/session, la séparation file hors ligne/inbox, la portée de configuration et la préservation des changements utilisateur. Surveiller ensuite les coûts réels du flux et de la lecture à plusieurs chats avant d’introduire un cache ou un service mutualisé supplémentaire.
+
+## 10. Preuves d’exécution — 2026-10-09
+
+### Base et limite atteinte
+
+- Worktree d’exécution : `/Users/alexandrecohen/projets/berth_fork-opencode-native`, branche `feat/opencode-native-workspace`.
+- Base transférée : `a175393fbc010b2cc0af1253ead4a4a2d3d244fe`. Uniquement les diffs suivis `app/`, `internal/`, `docs/` et les fichiers ordinaires `plans/`; aucun diff `site/` ni wallpaper. Le dépôt initial n’a été ni réinitialisé ni modifié.
+- **STOP au lot 0, condition « méthode absente du contrat public effectivement testé ».** Aucun lot 1–7 n’est implémenté. Le transport n’est pas retenu et la parité n’est pas déclarée.
+- Le test réel existant (Mini, faux fournisseur local, hooks, lecture après sortie) passait avant l’ajout du contrôle de surface. Le test étendu échoue explicitement sur `typeof ctx.session.compact = undefined` dans **OpenCode 2.0.18**, alors que cette méthode figure dans le guide public des plugins. Ce n’est pas un test ignoré.
+- L’inventaire du plugin montre aussi l’absence de `form`, `session.form`, `session.message`, `session.inbox`, `session.fork`, `session.revert` et `config`. Le pont `ctx` proposé ne peut donc pas être figé comme transport de l’ensemble du plan. Les noms HTTP ne sont pas des méthodes plugin implicites.
+
+### Binaire et isolation du contrat
+
+Le chemin fourni `.opencode/bin/opencode` est un script qui force `XDG_STATE_HOME="$HOME/.local/state"` et `OPENCODE_DB="opencode-v2.db"`, puis lance `$HOME/.local/share/opencode/bin/opencode`. Avec HOME temporaire, il échoue avant de démarrer. Le test a utilisé son exécutable réel : `/Users/alexandrecohen/.local/share/opencode/bin/opencode` (sortie isolée `opencode v2.0.18`). Aucun lanceur personnel n’a été modifié.
+
+Le test renforcé efface l’environnement hérité sauf PATH, répertoire temporaire, locale et terminal; il reconstruit HOME, XDG, TMPDIR et la base dans des répertoires temporaires. Le seul fournisseur configuré est `acme`, local, avec une clé synthétique. Il journalise les noms/types de méthodes, jamais des identifiants de connexion. Le binaire doit être un exécutable autonome, pas un lanceur dépendant du HOME personnel.
+
+### Options publiques recherchées et résultats exacts
+
+Sources relues : [CLI](https://opencode.ai/v2/docs/cli), [API](https://opencode.ai/v2/docs/api), [client](https://opencode.ai/v2/docs/build/client), [plugins](https://opencode.ai/v2/docs/build/plugins), [plugins Effect](https://opencode.ai/v2/docs/build/plugins/effect), [RPC](https://opencode.ai/v2/docs/build/plugins/rpc), [Web et serveur dédié](https://opencode.ai/v2/docs/cli/web), [réseau](https://opencode.ai/v2/docs/network), [configuration CLI](https://opencode.ai/v2/docs/cli/config).
+
+1. **Mini `--standalone`.** L’aide du binaire expose `--standalone`, `--server`, `--session`, `--fork`, `--model`, `--agent` et `--prompt`. Le plugin du processus propriétaire expose bien `session.prompt`, `session.interrupt`, `session.get`, `session.context`, `session.switchAgent`, `session.switchModel`, `permission.list/get/reply` et `event.subscribe`. `session.compact` est directement testé absent. Les espaces `ctx.form` et `ctx.session.form` sont directement testés `undefined`. Aucun mécanisme public de récupération des identifiants HTTP de ce Mini déjà lancé n’a été établi.
+2. **`api --standalone get /openapi.json`.** Le schéma servi par 2.0.18 contient les routes de formulaires, inbox, messages, compaction, fork/revert, permissions et événements. Le sous-test `published_http_surface` les vérifie. Leur présence HTTP ne résout pas l’accès au processus qui détient l’exécution; une nouvelle commande standalone n’est pas ce processus.
+3. **Serveur dédié natif : piste viable à spécifier.** Une sonde isolée a lancé `serve --service --hostname 127.0.0.1 --port 0` avec un `XDG_STATE_HOME` neuf. Le registre public de service contient `id`, `password`, `pid`, `url`, `version`; le PID correspond au seul enfant lancé. L’authentification Basic (`opencode`, mot de passe généré) donne HTTP 200 sur `/api/info`. `api server.info`, avec le même environnement isolé, retrouve le même PID. Le serveur a été arrêté par son handle de processus, sans appel à un service personnel. Sans authentification, `/api/info` et la création de session renvoient 401. Un Bearer contenant le mot de passe n’est pas accepté (401).
+4. **Admission sur ce serveur HTTP dédié.** Deux POST concurrents avec `id: "msg_acme_retry_contract"`, `text: "Acme durable admission"`, `resume: false` ont renvoyé la même admission, même ID et même date. Un troisième POST a renvoyé cette admission; la lecture inbox a retourné exactement une entrée. Cela prouve uniquement l’admission en attente de cette sonde, pas la livraison de bout en bout, la reprise après ACK perdu ou l’idempotence des commandes.
+5. **Client public et authentification.** Le paquet publié `@opencode/client@2.0.18`, lié par la documentation client, expose `Service.headers(endpoint)` et un endpoint Basic avec `username/password`. Son implémentation publique utilise le nom `opencode`. La documentation expose `Service.ensure({file, version, command, onStart})`. Elle permet de spécifier un service dédié; elle ne donne pas au plugin actuel toutes les méthodes de l’API HTTP.
+6. **RPC plugin.** Le RPC public ajoute des méthodes implémentées par le plugin; il ne crée pas les méthodes absentes de son contexte. Aucun import privé Core, fork d’OpenCode, accès direct à sa base ou proxy arbitraire n’a été ajouté.
+
+**Décision à reprendre avant l’UI :** réviser explicitement le lancement pour qu’un serveur HTTP privé précède Mini et en soit le propriétaire partagé avec Shipyard, ou choisir une version dont le contexte plugin couvre les opérations requises et le prouver. La première piste doit définir le passage d’authentification à Mini, la survie dans tmux, le registre par instance, le nettoyage et le traitement des lanceurs qui réécrivent XDG. Les preuves ci-dessus ne déclarent pas cette intégration réalisée. Une simple montée de version n’a pas été démontrée suffisante. Aucun binaire utilisateur n’a été mis à jour.
+
+### Vérifications effectuées
+
+Go 1.27.2 installé uniquement dans `app/node_modules/.shipyard-tools/go`, archive vérifiée par SHA-256 officiel. Dépendances app et docs installées normalement dans ce worktree, sans symlink.
+
+- `go vet ./...` : exit 0.
+- `go test -race ./...` : exit 0 après relance avec un délai suffisant; première exécution interrompue par la limite de 120 s. Le contrat opt-in est ignoré dans cette commande sans `OPENCODE_TEST_BIN`, il n’est donc pas validé par ce résultat.
+- `go test -race ./internal/box ./internal/integrations/adapters -run OpenCode -count=1` : exit 0; même réserve pour le contrat opt-in.
+- `OPENCODE_TEST_BIN=/Users/alexandrecohen/.local/share/opencode/bin/opencode go test ./internal/box -run '^TestOpenCodeLiveV2Contract$' -count=1 -v` : exécuté réellement, **exit 1 au contrôle de surface plugin**. Les hooks et réponses synthétiques du test historique ont fonctionné. Le lot 0 reste bloqué.
+- `cargo check` dans `app/src-tauri` : exit 0.
+- Dans `app`, `CI=true pnpm install --frozen-lockfile`, `pnpm typecheck:plugins`, `pnpm check:titles`, `pnpm check:csp`, `pnpm check:themes`, `pnpm test`, `pnpm build`, `npx tsc -p e2e` : chaque commande exit 0. Tests unitaires app : 271 réussis; thèmes : 24 réussis.
+- `pnpm build` dans `docs-site` : exit 0. Avertissement préexistant de téléchargement de police dynamique pour `⌘` (HTTP 400), sans échec du build.
+- Après contrôle que le port 1434 est libre, `E2E_PORT=1434 E2E_WORKERS=2 BERTH_E2E_LIVE=0 npx playwright test e2e/composer.spec.ts` : **3 réussis**, dont le choix fournisseur/modèle/variante préservé dans la baseline.
+- `e2e/opencode.spec.ts` non créé/non exécuté : aucun lot UI engagé. Tests Linux, deux runtimes simultanés avec permissions, reprise berthd, parcours complet et version minimale/courante : **non validés**.
+
+`plans/README.md` reste au reviewer. Aucun push, PR, déploiement ou changement des services personnels n’a été effectué.

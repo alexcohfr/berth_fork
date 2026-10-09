@@ -9,6 +9,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -111,13 +112,36 @@ func TestOpenCodeLiveV2Contract(t *testing.T) {
 	if bin == "" {
 		t.Skip("set OPENCODE_TEST_BIN to run the OpenCode V2 contract check")
 	}
+	var err error
+	bin, err = filepath.Abs(bin)
+	if err != nil {
+		t.Fatal(err)
+	}
+	// Only the executable and ordinary process plumbing cross the boundary.
+	// In particular, never inherit provider keys, CLI config, service endpoints,
+	// or plugin environment from the developer running this opt-in check.
+	for _, entry := range os.Environ() {
+		key, _, _ := strings.Cut(entry, "=")
+		switch key {
+		case "PATH", "TMPDIR", "LANG", "LC_ALL", "LC_CTYPE", "TERM":
+			continue
+		}
+		t.Setenv(key, "")
+		if err := os.Unsetenv(key); err != nil {
+			t.Fatal(err)
+		}
+	}
 	home := t.TempDir()
 	project := filepath.Join(home, "project")
 	if err := os.MkdirAll(project, 0o700); err != nil {
 		t.Fatal(err)
 	}
+	tmp := filepath.Join(home, "tmp")
+	if err := os.MkdirAll(tmp, 0o700); err != nil {
+		t.Fatal(err)
+	}
 	for key, value := range map[string]string{
-		"HOME": home, "XDG_CONFIG_HOME": filepath.Join(home, ".config"), "XDG_DATA_HOME": filepath.Join(home, "data"),
+		"HOME": home, "TMPDIR": tmp, "XDG_CONFIG_HOME": filepath.Join(home, ".config"), "XDG_DATA_HOME": filepath.Join(home, "data"),
 		"XDG_STATE_HOME": filepath.Join(home, "state"), "XDG_CACHE_HOME": filepath.Join(home, "cache"), "OPENCODE_DB": "test.db",
 		"OPENCODE_CONFIG": "", "OPENCODE_CONFIG_DIR": "", "OPENCODE_CONFIG_CONTENT": "", "BERTH_SESSION": "acme-opencode",
 	} {
@@ -126,6 +150,15 @@ func TestOpenCodeLiveV2Contract(t *testing.T) {
 			os.Unsetenv(key)
 		}
 	}
+	versionCtx, versionCancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer versionCancel()
+	version := exec.CommandContext(versionCtx, bin, "--version")
+	version.Dir = project
+	if out, err := version.CombinedOutput(); err != nil {
+		t.Fatalf("isolated OpenCode executable: %v: %s (use the executable, not a HOME-dependent launcher)", err, out)
+	} else {
+		t.Logf("contract version: %s", strings.TrimSpace(string(out)))
+	}
 	hooks := filepath.Join(home, "hooks")
 	fake := filepath.Join(home, "berthd")
 	if err := os.WriteFile(fake, []byte("#!/bin/sh\nprintf '%s %s\\n' \"$3\" \"$4\" >>\"$TEST_HOOKS\"\n"), 0o755); err != nil {
@@ -133,6 +166,25 @@ func TestOpenCodeLiveV2Contract(t *testing.T) {
 	}
 	t.Setenv("TEST_HOOKS", hooks)
 	if err := integrations.InstallTool(home, "opencode", fake, os.Stdout); err != nil {
+		t.Fatal(err)
+	}
+	probe := filepath.Join(home, "context.json")
+	t.Setenv("ACME_CONTEXT_PROBE", probe)
+	if err := os.WriteFile(filepath.Join(home, ".config", "opencode", "plugins", "acme-contract.js"), []byte(`
+import { writeFileSync } from "node:fs";
+export default { id: "acme-contract", setup(ctx) {
+  const methods = (value, prefix = "", depth = 0) => Object.entries(value).flatMap(([key, item]) => {
+    const name = prefix + key;
+    if (typeof item === "function") return [name];
+    return item && typeof item === "object" && depth < 2 ? methods(item, name + ".", depth + 1) : [];
+  });
+  writeFileSync(process.env.ACME_CONTEXT_PROBE, JSON.stringify({
+    version: ctx.app.version, methods: methods(ctx).sort(),
+    compact: typeof ctx.session.compact,
+    form: typeof ctx.form, sessionForm: typeof ctx.session.form,
+  }));
+} };
+`), 0o600); err != nil {
 		t.Fatal(err)
 	}
 	model := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -197,6 +249,57 @@ func TestOpenCodeLiveV2Contract(t *testing.T) {
 		t.Fatalf("session link: %s, %v", payload, err)
 	}
 	id := hook.ID
+	inventory, err := os.ReadFile(probe)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var surface struct {
+		Version     string   `json:"version"`
+		Methods     []string `json:"methods"`
+		Compact     string   `json:"compact"`
+		Form        string   `json:"form"`
+		SessionForm string   `json:"sessionForm"`
+	}
+	if err := json.Unmarshal(inventory, &surface); err != nil {
+		t.Fatal(err)
+	}
+	t.Logf("public plugin context: %s", inventory)
+	schemaBytes := api("get", "/openapi.json")
+	t.Run("published_http_surface", func(t *testing.T) {
+		var schema struct {
+			Paths map[string]map[string]struct {
+				ID string `json:"operationId"`
+			} `json:"paths"`
+		}
+		if err := json.Unmarshal(schemaBytes, &schema); err != nil {
+			t.Fatal(err)
+		}
+		var operations []string
+		for _, path := range schema.Paths {
+			for _, method := range path {
+				operations = append(operations, method.ID)
+			}
+		}
+		for _, operation := range []string{"session.prompt", "session.interrupt", "session.permission.reply", "session.form.reply", "session.message.list", "session.inbox.list", "session.compact", "session.fork", "session.revert.stage", "session.revert.clear", "session.revert.commit", "event.subscribe"} {
+			if !slices.Contains(operations, operation) {
+				t.Errorf("OpenCode %s HTTP schema lacks %s", surface.Version, operation)
+			}
+		}
+	})
+	t.Run("owner_plugin_surface", func(t *testing.T) {
+		// These are the documented plugin operations needed before choosing
+		// the socket bridge. An HTTP operation on a different standalone
+		// process cannot stand in for an absent owner-runtime operation.
+		for _, method := range []string{"session.prompt", "session.interrupt", "session.get", "session.context", "session.switchAgent", "session.switchModel", "permission.list", "permission.get", "permission.reply", "event.subscribe"} {
+			if !slices.Contains(surface.Methods, method) {
+				t.Errorf("OpenCode %s: public plugin context lacks %s; STOP before selecting the owner bridge", surface.Version, method)
+			}
+		}
+		if surface.Compact != "function" {
+			t.Errorf("OpenCode %s: typeof ctx.session.compact = %s; STOP before selecting the owner bridge", surface.Version, surface.Compact)
+		}
+		t.Logf("form namespaces: typeof ctx.form = %s; typeof ctx.session.form = %s (HTTP form routes do not imply plugin methods)", surface.Form, surface.SessionForm)
+	})
 	out = api("session.message.list", "--param", "sessionID="+id, "--param", "limit=100", "--param", "order=desc")
 	var page struct {
 		Data []transcript.OpenCodeMessage `json:"data"`
