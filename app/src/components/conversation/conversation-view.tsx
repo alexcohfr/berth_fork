@@ -31,7 +31,7 @@ import { PaneContext } from "@/lib/pane-context";
 import { isMock } from "@/hooks/use-berth-connection";
 import { keyOf } from "@/lib/conversation-store";
 import { rowKeyOf } from "@/lib/draft-text";
-import { applyCut, dropOlder, loadOlder, meta, restoreOlder, setCut, useHasHistory, useHistory, useOlder } from "@/lib/history";
+import { applyCut, dropOlder, loadOlder, loadNativeOlder, meta, restoreOlder, setCut, useHasHistory, useHistory, useOlder } from "@/lib/history";
 import { seedLongChat } from "@/lib/mock-history";
 import "@/components/conversation/conversation.css";
 import "@/components/conversation/history.css";
@@ -122,7 +122,7 @@ export function ConversationView({ items: live, onAnswer, edits, who = "The agen
     for (let i = items.length - 1; i >= 0; i--) if (items[i].kind === "user" || items[i].kind === "command") return items[i].id;
   }, [items]);
   const oldest = items.length ? meta(items[0]).off : undefined;
-  const nearTop = history && oldest ? () => void loadOlder(chat!.box, chat!.session, oldest) : undefined;
+  const nearTop = history && older.native ? () => void loadNativeOlder(chat!.box, chat!.session) : history && oldest ? () => void loadOlder(chat!.box, chat!.session, oldest) : undefined;
   // Shown again after its older turns went: they come back as they were.
   useEffect(() => {
     if (history && chat && chat.visible !== false && older.depth !== undefined) restoreOlder(chat.box, chat.session, oldest);
@@ -134,7 +134,7 @@ export function ConversationView({ items: live, onAnswer, edits, who = "The agen
   const itemsNow = useRef(items);
   itemsNow.current = items;
   const ctx = useMemo<PromptContext | null>(
-    () => (chat ? { box: chat.box, session: chat.session, claude: history && chat.agent === "claude", idle: chat.idle ?? true, who, items: () => itemsNow.current } : null),
+    () => (chat ? { box: chat.box, session: chat.session, claude: history && chat.agent === "claude", opencode: history && chat.agent === "opencode", idle: chat.idle ?? true, who, items: () => itemsNow.current } : null),
     [chat?.box, chat?.session, chat?.agent, chat?.idle, history, who],
   );
   // One function for every row, so a row draws again only when it changes.
@@ -147,7 +147,7 @@ export function ConversationView({ items: live, onAnswer, edits, who = "The agen
     [answer, edits, who],
   );
   const header =
-    history && oldest && (older.loading || older.error || older.items.length || !older.more || live.length >= 250) ? (
+    history && (oldest || older.native) && (older.native || older.loading || older.error || older.items.length || !older.more || live.length >= 250) ? (
       <OlderHeader older={older} onLoad={() => nearTop?.()} />
     ) : undefined;
 

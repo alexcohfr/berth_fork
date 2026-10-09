@@ -24,6 +24,7 @@ test("OpenCode providers collapse, stay open through refresh, and launch the sel
         : route.fulfill({ json: models });
     });
     let launched: Record<string, unknown> | undefined;
+    await page.route(`${agent.url}/v1/boxes/devl/api/**/attachments?*`, (route) => route.fulfill({ json: { path: "/w/shop/.berth/attachments/acme été.png", name: "acme été.png", type: "image/png", size: 8 } }));
     await page.route(`${agent.url}/v1/boxes/devl/api/tasks`, (route) => {
       launched = route.request().postDataJSON();
       return route.fulfill({ status: 400, json: { error: "Test stopped before launch" } });
@@ -63,8 +64,14 @@ test("OpenCode providers collapse, stay open through refresh, and launch the sel
     await page.clock.fastForward(60_100);
     expect(attempts).toBe(closedCalls);
     await composer.getByRole("textbox", { name: "What should your agents work on?" }).fill("Check the retry logic");
+    await composer.getByRole("textbox", { name: "What should your agents work on?" }).evaluate((element) => {
+      const data = new DataTransfer();
+      data.items.add(new File([new Uint8Array([137, 80, 78, 71, 13, 10, 26, 10])], "acme été.png", { type: "image/png" }));
+      element.dispatchEvent(new DragEvent("drop", { dataTransfer: data, bubbles: true, cancelable: true }));
+    });
+    await expect(composer.getByTestId("attachment-chip")).toHaveAttribute("data-state", "ready");
     await composer.getByRole("button", { name: "Start", exact: true }).click();
-    await expect.poll(() => launched).toMatchObject({ agent: "opencode", model: "acme/coder#high", location: "shop" });
+    await expect.poll(() => launched).toMatchObject({ agent: "opencode", model: "acme/coder#high", location: "shop", prompt: "Check the retry logic", files: [{ uri: "file:///w/shop/.berth/attachments/acme%20%C3%A9t%C3%A9.png" }] });
   } finally {
     await agent.close();
   }

@@ -310,6 +310,31 @@ func (s *Sessions) create(ctx context.Context, name, location, dir, command, age
 	shell := sessionShell()
 	argv := []string{shell, "-l"}
 	file := ""
+	if agent == "opencode" && strings.HasPrefix(command, "opencode mini --standalone") {
+		base := filepath.Join(filepath.Dir(s.Commands), "opencode")
+		if err := os.MkdirAll(base, 0o700); err != nil {
+			return Session{}, err
+		}
+		root, err := os.MkdirTemp(base, "runtime-")
+		if err != nil {
+			return Session{}, err
+		}
+		exe, err := os.Executable()
+		if err != nil {
+			return Session{}, err
+		}
+		id := "ses_" + openCodeNonce()
+		for _, kv := range env {
+			if v, ok := strings.CutPrefix(kv, "BERTH_OPENCODE_SESSION="); ok {
+				if !openCodeID.MatchString(v) {
+					return Session{}, badRequest("invalid OpenCode conversation")
+				}
+				id = v
+			}
+		}
+		env = append(env, "BERTH_OPENCODE_RUNTIME="+root, "BERTH_OPENCODE_SESSION="+id)
+		command = shellQuote(exe) + " opencode mini" + strings.TrimPrefix(command, "opencode mini --standalone")
+	}
 	if command != "" {
 		var err error
 		if file, err = s.writeCommand(name, command); err != nil {

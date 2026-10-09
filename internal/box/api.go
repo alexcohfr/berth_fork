@@ -182,6 +182,15 @@ func (b *Box) Mount(s *wire.Server) {
 	route("POST /v1/sessions/{name}/keys", b.sessionKeys)
 	route("POST /v1/sessions/{name}/interrupt", b.interruptSession)
 	route("GET /v1/sessions/{name}/controls", b.sessionControls)
+	route("GET /v1/sessions/{name}/opencode", b.openCodeState)
+	route("GET /v1/sessions/{name}/opencode/catalog", b.openCodeCatalog)
+	route("GET /v1/sessions/{name}/opencode/conversations", b.openCodeConversations)
+	route("GET /v1/sessions/{name}/opencode/settings", b.openCodeSettings)
+	route("POST /v1/sessions/{name}/opencode/settings", b.openCodeSettingAction)
+	route("GET /v1/sessions/{name}/opencode/transfer", b.openCodeTransfer)
+	route("POST /v1/sessions/{name}/opencode/transfer", b.openCodeTransfer)
+	route("POST /v1/sessions/{name}/opencode/resume", b.openCodeResume)
+	route("POST /v1/sessions/{name}/opencode/{action}", b.openCodeAction)
 	route("POST /v1/sessions/{name}/mode", b.setMode)
 	route("GET /v1/sessions/{name}/wait", b.waitForSession)
 	route("GET /v1/sessions/{name}/turns", b.listTurns)
@@ -538,11 +547,12 @@ func (b *Box) listSessions(w http.ResponseWriter, r *http.Request) error {
 // SessionRequest starts a session: Command, or the Agent preset with its
 // first Prompt. Open asks the app to show it ("split" or "tab").
 type SessionRequest struct {
-	Name     string `json:"name,omitempty"`
-	Location string `json:"location"`
-	Command  string `json:"command,omitempty"`
-	Agent    string `json:"agent,omitempty"`
-	Prompt   string `json:"prompt,omitempty"`
+	Name     string         `json:"name,omitempty"`
+	Location string         `json:"location"`
+	Command  string         `json:"command,omitempty"`
+	Agent    string         `json:"agent,omitempty"`
+	Prompt   string         `json:"prompt,omitempty"`
+	Files    []openCodeFile `json:"files,omitempty"`
 	// Model and Effort, with an agent: see TaskRequest.
 	Model  string `json:"model,omitempty"`
 	Effort string `json:"effort,omitempty"`
@@ -567,6 +577,9 @@ func (b *Box) addSession(w http.ResponseWriter, r *http.Request) error {
 		return badRequest("open must be split or tab")
 	}
 	if req.Home {
+		if len(req.Files) > 0 {
+			return badRequest("native attachments need an OpenCode project task")
+		}
 		return b.addHomeSession(w, r, req)
 	}
 	dir, err := b.Locations.Dir(r.Context(), req.Location)
@@ -596,7 +609,14 @@ func (b *Box) addSession(w http.ResponseWriter, r *http.Request) error {
 		req.Name = defaultSessionName(req.Location, req.Command)
 	}
 	preset := req.Agent
-	sess, err := b.startSession(r, req.Name, req.Location, dir, req.Command, preset, preset != "" && req.Prompt != "")
+	if len(req.Files) > 0 && (preset != "opencode" || !strings.HasPrefix(req.Command, "opencode mini --standalone")) {
+		return badRequest("native attachments require the built-in OpenCode launcher")
+	}
+	files, err := b.openCodeInitialFiles(r.Context(), req.Location, dir, req.Files)
+	if err != nil {
+		return err
+	}
+	sess, err := b.startSession(r, req.Name, req.Location, dir, req.Command, preset, preset != "" && (req.Prompt != "" || len(files) > 0), files)
 	if err != nil {
 		return err
 	}
@@ -646,24 +666,47 @@ func (b *Box) announceOpen(r *http.Request, sess Session, open string) {
 // startSession runs command in dir once the hooks allow it; preset is the
 // agent preset it runs, if any, and prompted says its command carries a
 // first prompt.
-func (b *Box) startSession(r *http.Request, name, location, dir, command, preset string, prompted bool) (Session, error) {
+func (b *Box) startSession(r *http.Request, name, location, dir, command, preset string, prompted bool, initialFiles ...[]openCodeFile) (Session, error) {
 	data := map[string]any{"name": name, "location": location, "path": dir, "command": command}
 	if err := b.before(r, "session.start", data); err != nil {
 		return Session{}, err
 	}
-	sess, err := b.createAgentSession(r.Context(), name, location, dir, command, preset)
+	if prompted && preset == "opencode" {
+		if err := b.before(r, "session.send", map[string]any{"name": name, "path": dir, "location": location, "action": "opencode.first-prompt"}); err != nil {
+			return Session{}, err
+		}
+	}
+	var sess Session
+	var err error
+	if len(initialFiles) > 0 && len(initialFiles[0]) > 0 {
+		env, wrap := b.sessionEnv(r.Context(), dir)
+		data, _ := json.Marshal(initialFiles[0])
+		env = append(env, "BERTH_OPENCODE_FILES="+string(data))
+		sess, err = b.Sessions.create(r.Context(), name, location, dir, command, preset, env, wrap)
+	} else {
+		sess, err = b.createAgentSession(r.Context(), name, location, dir, command, preset)
+	}
 	if err != nil {
 		return Session{}, err
 	}
 	if a := agentFor(sess); a != "" {
 		data["agent"] = a
 	}
+	if controlAgent(sess) == "opencode" {
+		data["command"] = "opencode mini"
+	}
 	b.publish(r, "session.started", data)
 	if prompted {
-		b.startupPrompt(origin(r), gateOrigin(r), Session{Name: sess.Name, Agent: agentFor(sess)})
+		if len(initialFiles) > 0 && len(initialFiles[0]) > 0 {
+			b.publish(r, "session.sent", map[string]any{"name": sess.Name, "agent": "opencode", "from": gateOrigin(r), "startup": true, "idem_key": "initial", "native_id": "msg_first_" + b.openCodeSession(sess)})
+		} else {
+			b.startupPrompt(origin(r), gateOrigin(r), Session{Name: sess.Name, Agent: agentFor(sess)})
+		}
 	}
 	sess = b.enrich(r.Context(), []Session{sess})[0]
-	b.beginStartup(origin(r), sess)
+	if controlAgent(sess) != "opencode" {
+		b.beginStartup(origin(r), sess)
+	}
 	return sess, nil
 }
 

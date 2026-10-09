@@ -25,16 +25,18 @@ func TestBerthShipsItsSkillsWithFrontmatter(t *testing.T) {
 
 func TestSkillsInstallReportAndUninstall(t *testing.T) {
 	home := t.TempDir()
+	t.Setenv("OPENCODE_CONFIG_DIR", "")
+	t.Setenv("XDG_CONFIG_HOME", "")
 	names, _ := SkillNames([]string{"all"})
 	for _, agent := range SkillAgents() {
-		if st, _ := SkillStatus(home, agent, "berth"); st != SkillMissing {
+		if st, _ := UserSkillStatus(home, agent, "berth"); st != SkillMissing {
 			t.Fatalf("%s before install: %s", agent, st)
 		}
 		paths, err := InstallSkills(home, agent, names)
 		if err != nil || len(paths) != len(names) {
 			t.Fatalf("%s install: %v %v", agent, paths, err)
 		}
-		if st, _ := SkillStatus(home, agent, "berth-preview"); st != SkillInstalled {
+		if st, _ := UserSkillStatus(home, agent, "berth-preview"); st != SkillInstalled {
 			t.Fatalf("%s after install: %s", agent, st)
 		}
 	}
@@ -81,6 +83,37 @@ func TestInstallingForCodexRemovesTheOldCopyCodexNoLongerReads(t *testing.T) {
 	}
 	if _, err := os.Stat(mine); err != nil {
 		t.Fatal("a user's own Codex skill was removed")
+	}
+}
+
+func TestOpenCodeSkillsKeepUserOverridesSeparateFromProject(t *testing.T) {
+	home, repo, xdg, override := t.TempDir(), t.TempDir(), t.TempDir(), t.TempDir()
+	t.Setenv("XDG_CONFIG_HOME", xdg)
+	t.Setenv("OPENCODE_CONFIG_DIR", "")
+	if dir, err := UserSkillDir(home, "opencode"); err != nil || dir != filepath.Join(xdg, "opencode", "skills") {
+		t.Fatalf("XDG skill scope: %s %v", dir, err)
+	}
+	t.Setenv("OPENCODE_CONFIG_DIR", override)
+	if _, err := InstallSkills(home, "opencode", []string{"berth"}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.Stat(filepath.Join(override, "skills", "berth", "SKILL.md")); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := InstallProjectSkills(repo, "opencode", []string{"berth"}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.Stat(filepath.Join(repo, ".opencode", "skills", "berth", "SKILL.md")); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := UninstallProjectSkills(repo, "opencode", []string{"berth"}); err != nil {
+		t.Fatal(err)
+	}
+	if state, err := UserSkillStatus(home, "opencode", "berth"); err != nil || state != SkillInstalled {
+		t.Fatalf("project removal affected user scope: %s %v", state, err)
+	}
+	if _, err := UninstallSkills(home, "opencode", []string{"berth"}); err != nil {
+		t.Fatal(err)
 	}
 }
 

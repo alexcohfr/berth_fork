@@ -101,6 +101,26 @@ func (b *Box) interruptSession(w http.ResponseWriter, r *http.Request) error {
 	if err := b.before(r, "session.send", map[string]any{"name": name, "key": "escape"}); err != nil {
 		return err
 	}
+	if controlAgent(sess) == "opencode" {
+		ep, owner, err := b.openCodeRuntime(r.Context(), sess)
+		if err != nil {
+			return err
+		}
+		var result struct {
+			Interrupted bool `json:"interrupted"`
+		}
+		if err := ep.call(r.Context(), "POST", "/api/session/"+owner.SessionID+"/interrupt", nil, &result); err != nil {
+			return err
+		}
+		var active struct {
+			Data map[string]any `json:"data"`
+		}
+		if err := ep.call(r.Context(), "GET", "/api/session/active", nil, &active); err != nil {
+			return err
+		}
+		writeJSON(w, map[string]bool{"sent": true, "stopped": active.Data[owner.SessionID] == nil, "accepted": result.Interrupted})
+		return nil
+	}
 	var st SessionState
 	if b.Turns != nil {
 		st, _ = b.Turns.State(name)

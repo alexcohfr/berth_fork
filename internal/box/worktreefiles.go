@@ -386,6 +386,9 @@ func (b *Box) putWorktreeFile(w http.ResponseWriter, r *http.Request) error {
 		mode = st.Mode().Perm()
 	}
 	data := []byte(*in.Content)
+	if err := validateOpenCodeJSONC(rel, data); err != nil {
+		return err
+	}
 	if err := writeAtomic(abs, data, mode); err != nil {
 		return err
 	}

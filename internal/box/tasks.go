@@ -261,9 +261,10 @@ type TaskRequest struct {
 	PR       int    `json:"pr,omitempty"`
 	Ref      string `json:"ref,omitempty"`
 	// Agent is a preset ID; Command, when set, is run instead.
-	Agent   string `json:"agent,omitempty"`
-	Command string `json:"command,omitempty"`
-	Prompt  string `json:"prompt,omitempty"`
+	Agent   string         `json:"agent,omitempty"`
+	Command string         `json:"command,omitempty"`
+	Prompt  string         `json:"prompt,omitempty"`
+	Files   []openCodeFile `json:"files,omitempty"`
 	// Model and Effort pick the agent's model and effort, by the CLI's own
 	// names (see AgentPreset); empty is the CLI's default.
 	Model  string `json:"model,omitempty"`
@@ -312,6 +313,9 @@ func (b *Box) addTask(w http.ResponseWriter, r *http.Request) error {
 		return badRequest("a model or an effort needs an agent, not a command")
 	}
 	data := map[string]any{"location": req.Location, "name": req.Name, "branch": req.Branch, "base": req.Base, "agent": req.Agent, "command": command}
+	if len(req.Files) > 0 && (req.Agent != "opencode" || req.Command != "" || !strings.HasPrefix(command, "opencode mini --standalone")) {
+		return badRequest("native attachments require the built-in OpenCode launcher")
+	}
 	if err := b.before(r, "task.create", data); err != nil {
 		return err
 	}
@@ -324,7 +328,13 @@ func (b *Box) addTask(w http.ResponseWriter, r *http.Request) error {
 	if req.Command == "" {
 		preset = req.Agent
 	}
-	sess, err := b.startSession(r, defaultSessionName(where, command), where, wt.Path, command, preset, preset != "" && req.Prompt != "")
+	files, fileErr := b.openCodeInitialFiles(ctx, req.Location, wt.Path, req.Files)
+	var sess Session
+	if fileErr != nil {
+		err = fileErr
+	} else {
+		sess, err = b.startSession(r, defaultSessionName(where, command), where, wt.Path, command, preset, preset != "" && (req.Prompt != "" || len(files) > 0), files)
+	}
 	if err != nil {
 		// A task is a worktree with an agent in it: without the agent, the
 		// worktree it made goes too, so a retry starts clean.

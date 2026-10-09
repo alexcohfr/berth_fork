@@ -47,7 +47,7 @@ func TestOpenCodeConversationAndToolDetails(t *testing.T) {
 	page.Data[0].Content[1].Text += " Fixed it."
 	page.Data[0].Content[2].State.Status = "completed"
 	next := OpenCode("ses_acme", "/acme", page.Data, true)
-	if !next.Truncated || next.Items[4].ID != r.Items[3].ID || !next.Items[5].Done || next.Items[4].Text != "I found the retry bug. Fixed it." {
+	if !next.More || next.Items[3].ID != r.Items[3].ID || !next.Items[4].Done || next.Items[3].Text != "I found the retry bug. Fixed it." {
 		t.Fatalf("update = %+v", next)
 	}
 }

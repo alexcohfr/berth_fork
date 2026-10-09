@@ -8,7 +8,7 @@ export default {
     // Shipyard launches a private server per pane. Never attribute activity
     // from a shared service (which may have inherited an old pane's env).
     // V2's --standalone client spawns `serve --stdio` for the plugin host.
-    if (!process.env.BERTH_SESSION || !process.argv.includes("--stdio")) return;
+    if (!process.env.BERTH_SESSION || (!process.argv.includes("--stdio") && !process.env.BERTH_OPENCODE_RUNTIME)) return;
     const controller = new AbortController();
     const report = (event, session) => new Promise((resolve) => {
       const payload = JSON.stringify({ cwd: session.location.directory, session_id: session.id });
@@ -37,7 +37,8 @@ export default {
             const session = await ctx.session.get({ sessionID: id });
             // The bus includes other locations and child sessions. A helper
             // finishing must not mark the parent's turn as done.
-            if (session.parentID || session.location.directory !== ctx.location.directory) continue;
+            const root = process.env.BERTH_OPENCODE_SESSION;
+            if ((root ? session.id !== root : session.parentID) || session.location.directory !== ctx.location.directory) continue;
             await report(hook, session);
           } catch { /* A removed session or failed hook must not fail OpenCode. */ }
         }

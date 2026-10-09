@@ -118,6 +118,7 @@ type CrewMember struct {
 // index N and after (an open tool group is sent again until it is done, so
 // the app replaces items by ID), the index to ask from next, and the crew.
 type Result struct {
+	Cursor    *string      `json:"cursor,omitempty"`
 	Source    string       `json:"source"`
 	Items     []Item       `json:"items"`
 	Next      int          `json:"next"`

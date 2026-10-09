@@ -15,6 +15,7 @@ import {
 import { type KeyboardEvent, type ReactNode, useEffect, useMemo, useRef, useState } from "react";
 
 import { ArtBoardChip, useSessionArt } from "@/components/art/board-buttons";
+import { OpenCodeControls } from "@/components/conversation/opencode-controls";
 import { ArtifactsChip, useArtifacts } from "@/components/conversation/artifacts";
 import { CrewCard } from "@/components/conversation/crew-card";
 import { teammatesOf } from "@/lib/agent-messages";
@@ -99,7 +100,7 @@ export function ChatControls({ box, session, agent, state, stateSince, dir, who,
     setStopping(true);
     try {
       const r = await interrupt(box, session);
-      if (!r.stopped) toastManager.add({ type: "info", title: `${who} hasn't stopped yet`, description: "Esc reached it, but its screen still shows it working. Look at its terminal, or press Stop again." });
+      if (!r.stopped) toastManager.add({ type: "info", title: `${who} hasn't stopped yet`, description: agent === "opencode" ? "The runtime acknowledged the request; its current state will refresh." : "Esc reached it, but its screen still shows it working. Look at its terminal, or press Stop again." });
     } catch (err) {
       toastError(err, { title: `Couldn't stop ${who}`, box });
     } finally {
@@ -125,19 +126,21 @@ export function ChatControls({ box, session, agent, state, stateSince, dir, who,
   const made = useSessionArt(box, session).length;
   const published = pages > 0 || made > 0;
   const chips = !ended && (agent === "claude" || agent === "codex");
+  const native = !ended && agent === "opencode";
 
   return (
     <div data-chat-controls>
+      {native && <OpenCodeControls key={`${box}/${session}`} box={box} session={session} visible={visible} onShowTerminal={onShowTerminal} />}
       {docked.map((n) => (
         <div key={n.id} className="mb-2">
           <NoticeCard it={n} scope={scope} />
         </div>
       ))}
       {!ended && sig?.retrying && working && <Retrying r={sig.retrying} />}
-      {!ended && labs && (!!crew?.length || teammates.length > 0) && <CrewCard key={keyOf(box, session)} crew={crew ?? []} teammates={teammates} chat={{ box, session }} />}
+      {!ended && (labs || native) && (!!crew?.length || teammates.length > 0) && <CrewCard key={keyOf(box, session)} crew={crew ?? []} teammates={teammates} chat={{ box, session }} />}
       {!ended && !!sig?.todos?.length && <TodoCard todos={sig.todos} session={keyOf(box, session)} working={working} />}
       <div onKeyDown={onKeyDown}>{children}</div>
-      {(chips || published) && (
+      {(chips || native || published) && (
         <div className="mt-1.5 flex min-h-6 flex-wrap items-center gap-x-0.5 gap-y-1 px-0.5">
           {chips && agent && (
             <>
@@ -150,11 +153,11 @@ export function ChatControls({ box, session, agent, state, stateSince, dir, who,
           <span className="flex-1" />
           <ArtBoardChip box={box} session={session} className={chip} />
           <ArtifactsChip box={box} session={session} who={who} className={chip} />
-          {chips && working && supported && (
+          {(chips || native) && working && supported && (
             <Tip
               label={
                 <span className="flex items-center gap-1.5">
-                  Stop {who}, as Esc does at its terminal <Kbd>Esc</Kbd>
+                  Stop {who} <Kbd>Esc</Kbd>
                 </span>
               }
             >

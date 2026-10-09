@@ -113,10 +113,10 @@ But : prouver que Berth peut dialoguer avec le même moteur que son terminal san
 
 1. Étendre `TestOpenCodeLiveV2Contract` dans `internal/box/opencode_test.go`. Garder son HOME/XDG/store temporaires et son faux fournisseur HTTP local : aucun appel modèle payant.
 2. Vérifier, sur le binaire V2 choisi, comment joindre le serveur privé démarré par Mini. Privilégier un transport natif existant s’il expose ce processus de façon authentifiée et stable.
-3. Si le mode stdio privé n’offre pas ce transport, la solution recommandée est un **pont local étroit dans le plugin déjà installé**, sur socket Unix, qui appelle le `ctx` public du processus actif. Bibliothèques standard Go/Node ; liste fermée d’actions et événements, pas d’évaluation de code ni de proxy de méthodes arbitraires. Lister les méthodes effectivement présentes dans le contexte plugin et les tester avant de figer cette solution.
+3. Révision du 2026-10-09 : le contexte plugin 2.0.18 ne couvre pas le plan. Utiliser le **serveur HTTP natif privé** (`serve`), démarré dans l'environnement de la tâche, puis connecter Mini au même propriétaire par le mécanisme public de découverte/authentification vérifié sur le binaire. `serve --service --hostname 127.0.0.1 --port 0` avec registre XDG isolé a été sondé avec succès. Valider également Mini avant toute UI. Aucune dépendance envers les méthodes plugin absentes ; conserver le plugin pour les événements déjà exposés. Go `net/http`, opérations explicitement autorisées, pas de proxy générique exposé au frontend.
 4. Conserver une instance privée par session Shipyard pour la première version. Le répertoire de socket/registre appartient à la box et à son utilisateur, hors dépôt. Parent privé, socket privée, validation des identités et du répertoire, budget de corps/réponse, nettoyage uniquement des ressources possédées. Aucune URL de contrôle arbitraire fournie par le frontend.
 5. Enregistrer seulement le lien session/instance/emplacement du canal. Le reconstruire après redémarrage de berthd sans arrêter Mini. Détecter une instance périmée, y compris réutilisation de PID ou nom de session. Ne pas tuer une instance inconnue.
-6. Documenter dans ce plan le transport retenu, la version testée et les limites. Si le pont local exige une API privée ou un fork d’OpenCode, STOP : revoir le transport avant les lots UI.
+6. Documenter le transport, la version, l'authentification Mini/API et la survie sous tmux. Si le transport exige une API privée ou un fork d’OpenCode, STOP. L'absence de méthodes plugin n'est plus une condition bloquante lorsque leur équivalent HTTP est vérifié sur le runtime propriétaire. Le test réel doit valider ce contrat HTTP plutôt qu'exiger des méthodes plugin inutilisées.
 
 **Preuves obligatoires :** deux sessions dans le même worktree ont des environnements distincts ; arrêter A laisse B active ; répondre à une permission débloque le bon processus ; redémarrer le client berthd de test permet de retrouver le lien ; le service partagé personnel reste hors du chemin de contrôle.
 
@@ -300,6 +300,7 @@ E2E_PORT=1434 npx playwright test e2e/opencode.spec.ts
 **Fichiers autorisés, selon le lot :**
 
 - `internal/box/opencode*.go`, `tasks*.go`, `api.go`, `orchestrate*.go`, `controls*.go`, `answer*.go`, `commands*.go`, `history*.go`, `attachments*.go`, `skills*.go`, `turns*.go`, `tmux.go`, `sessions*.go`, `runhost.go`, tests d’orchestration concernés.
+- Extension explicite du 2026-10-09 : point d'entrée `cmd/berthd` et routage de commande existant si un petit lanceur natif est nécessaire pour superviser serveur privé + Mini dans tmux. Réutiliser le binaire Shipyard, pas de nouveau service installé. Tests du lanceur dans les mêmes packages. Les fichiers communs de types/API/notifications strictement nécessaires aux lots restent autorisés si leur rôle est consigné dans le compte rendu.
 - `internal/integrations/adapters/opencode*`, `internal/integrations/{command,skills,accounts}.go` et leurs tests ; `internal/transcript/opencode*`, types communs de transcript si une extension additive est nécessaire, fixtures synthétiques associées.
 - `internal/agent/queue*.go` et client de livraison uniquement pour la continuité d’ID/payload hors ligne ; ne pas refondre la queue générale.
 - `app/src/lib/{api,commands,skills,attachments,chat-controls,transcript,transcript-feed,conversation-store,history,questions,queue}.ts`, nouveaux helpers/types `opencode*.ts` si nécessaires, tests associés.
@@ -423,3 +424,17 @@ Go 1.27.2 installé uniquement dans `app/node_modules/.shipyard-tools/go`, archi
 - `e2e/opencode.spec.ts` non créé/non exécuté : aucun lot UI engagé. Tests Linux, deux runtimes simultanés avec permissions, reprise berthd, parcours complet et version minimale/courante : **non validés**.
 
 `plans/README.md` reste au reviewer. Aucun push, PR, déploiement ou changement des services personnels n’a été effectué.
+
+### Révision après vérification du blocage
+
+Le reviewer a relu les preuves et les guides publics CLI, Web, Troubleshooting et client le 2026-10-09. Le STOP sur le pont plugin est confirmé, mais une révision de transport permet de continuer l'objectif approuvé : serveur HTTP privé par tâche, client Mini et client Shipyard sur le même processus. La section lot 0 ci-dessus remplace la proposition de pont. Le résultat négatif du test plugin reste une preuve historique, pas une obligation d'ajouter une méthode au plugin ou de garder un test volontairement rouge.
+
+Contrat de lancement à prouver : authentification par mécanisme public, refus non authentifié, session liée identique vue par Mini et API, arrêt/permission affectant le propriétaire attendu, survie aux déconnexions du client/daemon, arrêt limité aux processus possédés. Les mots de passe ne vont ni dans les arguments, ni les URL, ni le journal ; registre privé et env seulement lorsque le binaire les prend en charge. Ne pas modifier le service personnel. Le lanceur utilisateur connu réécrit XDG : détecter explicitement l'échec d'isolation ; ne pas déduire un exécutable en décodant arbitrairement un script. Un chemin explicite de binaire compatible ou un mécanisme de connexion explicite documenté peut résoudre ce cas. Les essais restent isolés avec l'exécutable réel déjà identifié.
+
+### Reprise — contrôle de création avec image
+
+Les contrôles Go/app/docs et le contrat HTTP étendu ont passé avant l'ajout du scénario de première image sur un nouveau worktree. Ce dernier a ensuite échoué plusieurs fois : configuration synthétique initialement non commitée dans le repo jetable, assertion de chemin non canonique sur macOS, puis délai sans requête image observée. Le lot n'est pas validé sur ces résultats. Diagnostic ciblé du lanceur en cours, sans élargissement de périmètre ; les statuts du README restent au reviewer.
+
+## 11. Recette de l'implémentation révisée
+
+Le compte rendu actuel est `plans/001-opencode-native-acceptance.md`. Il distingue l'implémentation des lots 0–7, les tests réellement exécutés et les limites de validation. La section 10 conserve les preuves historiques du pont plugin abandonné ; elle ne décrit pas l'état actuel du transport HTTP natif. Les statuts de `plans/README.md` restent ceux du reviewer.

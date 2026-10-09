@@ -1,5 +1,5 @@
 import { GitBranchIcon, PencilIcon, Undo2Icon } from "lucide-react";
-import { createContext, useContext, useState } from "react";
+import { createContext, useContext, useEffect, useRef, useState } from "react";
 
 import { AttachmentChips, useAttachments } from "@/components/conversation/attachments";
 import { toastError } from "@/components/error-note";
@@ -16,6 +16,7 @@ import { useStore } from "@/lib/store";
 import { findSession, focusPane } from "@/lib/workspaces";
 import type { TranscriptItem } from "@/lib/transcript";
 import { cn } from "@/lib/utils";
+import { openCodeAction, type OpenCodeState } from "@/lib/opencode";
 
 // A sent prompt's three actions, under it while the pointer is on it:
 // edit and resend (its words back in the reply box), fork from here (a new
@@ -28,6 +29,7 @@ export interface PromptContext {
   session: string;
   // Claude Code with a box that serves history: fork and rewind work.
   claude: boolean;
+  opencode?: boolean;
   // The agent is idle: a rewind can drive its screen.
   idle: boolean;
   who: string;
@@ -45,9 +47,9 @@ export function PromptActions({ it }: { it: Extract<TranscriptItem, { kind: "use
   if (!ctx) return null;
   const m = meta(it);
   // A prompt still on its way has no entry in the agent's record yet.
-  const recorded = (!!m.uuid || isMock()) && !it.id.startsWith("sent:");
-  const canFork = ctx.claude && recorded;
-  const canRewind = ctx.claude && recorded;
+  const recorded = (!!m.uuid || (ctx.opencode && it.id.startsWith("msg_")) || isMock()) && !it.id.startsWith("sent:");
+  const canFork = (ctx.claude || ctx.opencode) && recorded;
+  const canRewind = (ctx.claude || ctx.opencode) && recorded;
   return (
     <div className={cn("hs-acts mb-1 flex shrink-0 items-center gap-0.5 text-muted-foreground", dialog && "pointer-events-none")} data-open={dialog ? "" : undefined}>
       <Tip label="Edit and resend">
@@ -77,7 +79,7 @@ export function PromptActions({ it }: { it: Extract<TranscriptItem, { kind: "use
         </Tip>
       )}
       {dialog === "fork" && <ForkDialog ctx={ctx} it={it} onClose={() => setDialog(undefined)} />}
-      {dialog === "rewind" && <RewindDialog ctx={ctx} it={it} onClose={() => setDialog(undefined)} />}
+      {dialog === "rewind" && (ctx.opencode ? <OpenCodeRewindDialog ctx={ctx} it={it} onClose={() => setDialog(undefined)} /> : <RewindDialog ctx={ctx} it={it} onClose={() => setDialog(undefined)} />)}
     </div>
   );
 }
@@ -90,6 +92,7 @@ const title = (text: string) => {
 function ForkDialog({ ctx, it, onClose }: { ctx: PromptContext; it: Extract<TranscriptItem, { kind: "user" }>; onClose(): void }) {
   const [text, setText] = useState(it.text);
   const [busy, setBusy] = useState(false);
+  const request = useRef<{ payload: string; id: string }>(undefined);
   // The fork works in this worktree: files dropped or pasted go up there.
   const files = useAttachments({ box: ctx.box, session: ctx.session });
   const fork = async () => {
@@ -97,7 +100,10 @@ function ForkDialog({ ctx, it, onClose }: { ctx: PromptContext; it: Extract<Tran
     if (!client || files.blocker) return;
     setBusy(true);
     try {
-      const s = await historyApi.fork(client, ctx.box, ctx.session, { at: meta(it).parent ?? (isMock() ? `id:${it.id}` : undefined), text: withAttachments(text.trim(), files.paths) || undefined, title: `Fork of ${title(it.text)}`, open: "tab" });
+      const payload = JSON.stringify([it.id, text, files.paths]);
+      if (request.current?.payload !== payload) request.current = { payload, id: crypto.randomUUID() };
+      const nativeFiles = ctx.opencode ? files.paths.map((path) => { const uri = new URL("file:///"); uri.pathname = path.split("/").map(encodeURIComponent).join("/"); return { uri: uri.href }; }) : undefined;
+      const s = await historyApi.fork(client, ctx.box, ctx.session, { at: ctx.opencode ? it.id : meta(it).parent ?? (isMock() ? `id:${it.id}` : undefined), text: (ctx.opencode ? text.trim() : withAttachments(text.trim(), files.paths)) || undefined, files: nativeFiles, idem_key: request.current.id, title: `Fork of ${title(it.text)}`, open: "tab" });
       toastManager.add({ type: "success", title: "Forked", description: `A new ${ctx.who} with the conversation up to this message, in its own tab.` });
       onClose();
       // The box opens it as a tab beside this one; asked for here, it comes
@@ -153,6 +159,29 @@ function ForkDialog({ ctx, it, onClose }: { ctx: PromptContext; it: Extract<Tran
       </DialogPopup>
     </Dialog>
   );
+}
+
+function OpenCodeRewindDialog({ ctx, it, onClose }: { ctx: PromptContext; it: Extract<TranscriptItem, { kind: "user" }>; onClose(): void }) {
+  const [preview, setPreview] = useState<{ state: OpenCodeState; text: string; reason: string }>();
+  const [failure, setFailure] = useState<string>();
+  const [busy, setBusy] = useState(false);
+  useEffect(() => {
+    let alive = true;
+    const client = useStore.getState().client;
+    if (!client) return;
+    void (async () => {
+      try {
+        const state = await client.box<OpenCodeState>(ctx.box, "GET", `sessions/${encodeURIComponent(ctx.session)}/opencode`);
+        const result = await openCodeAction(ctx.box, ctx.session, state, "revert-preview", { id: it.id }) as { text: string; reason: string };
+        if (alive) setPreview({ ...result, state });
+      } catch (err) { if (alive) setFailure(err instanceof Error ? err.message : String(err)); }
+    })();
+    return () => { alive = false; };
+  }, [ctx.box, ctx.session, it.id]);
+  return <Dialog open onOpenChange={(o) => !o && !busy && onClose()}><DialogPopup className="max-w-md"><DialogHeader><DialogTitle>Preview OpenCode rewind</DialogTitle><DialogDescription>Stage a reversible conversation boundary before this message. Confirm or cancel it from the OpenCode controls afterward.</DialogDescription></DialogHeader><DialogPanel>
+    {failure && <p role="alert">{failure}</p>}
+    {preview ? <><p className="max-h-40 overflow-auto whitespace-pre-wrap">{preview.text}</p><p className="mt-3 text-muted-foreground text-xs">{preview.reason}. Files affected: none.</p></> : !failure && <p role="status">Reading the native boundary…</p>}
+  </DialogPanel><DialogFooter><DialogClose render={<Button variant="ghost" disabled={busy} />}>Cancel</DialogClose><Button disabled={!preview || busy} onClick={() => { if (!preview) return; setBusy(true); void openCodeAction(ctx.box, ctx.session, preview.state, "revert-stage", { id: it.id }).then(onClose, (err) => setFailure(err instanceof Error ? err.message : String(err))).finally(() => setBusy(false)); }}>Stage conversation rewind</Button></DialogFooter></DialogPopup></Dialog>;
 }
 
 function RewindDialog({ ctx, it, onClose }: { ctx: PromptContext; it: Extract<TranscriptItem, { kind: "user" }>; onClose(): void }) {

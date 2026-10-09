@@ -91,7 +91,7 @@ func (b *Box) SkillsReport(r *http.Request, location string) (SkillsReport, erro
 		out.ProjectDirs = map[string]string{}
 	}
 	for _, agent := range out.Agents {
-		out.UserDirs[agent], _ = integrations.SkillDir(home, agent)
+		out.UserDirs[agent], _ = integrations.UserSkillDir(home, agent)
 		if repo != "" {
 			out.ProjectDirs[agent], _ = integrations.SkillDir(repo, agent)
 		}

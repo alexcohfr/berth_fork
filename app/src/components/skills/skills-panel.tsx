@@ -18,6 +18,7 @@ import { ErrorText } from "@/components/error-note";
 const agentNames: Record<SkillAgent, string> = {
   claude: "Claude Code",
   codex: "Codex",
+  opencode: "OpenCode",
 };
 
 // SkillsPanel shows Shipyard's skills on one box, for its user or, with a
@@ -71,6 +72,8 @@ export function SkillsPanel({ box, location, className, hideTitle }: { box: stri
   const states = (s: SkillRow) => (target === "project" ? s.project : s.user);
   const pending = report?.skills.some((s) => report.agents.some((a) => states(s)?.[a] !== "installed")) ?? false;
   const dirs = target === "project" ? report?.project_dirs : report?.user_dirs;
+  const agents = report?.agents ?? [];
+  const grid = { gridTemplateColumns: `minmax(0,1fr) repeat(${Math.max(agents.length, 1)}, minmax(5rem, 7.5rem))` };
 
   return (
     <Card className={cn("overflow-hidden", className)}>
@@ -82,7 +85,7 @@ export function SkillsPanel({ box, location, className, hideTitle }: { box: stri
           </CardFrameTitle>
         )}
         <CardFrameDescription className="text-xs">
-          {location ? "Only agents working in this repository learn them." : "Every agent the box's user runs learns them."} They teach Claude Code and Codex to use Shipyard.
+          {location ? "Only agents working in this repository learn them." : "Every agent the box's user runs learns them."} They teach Claude Code, Codex and OpenCode to use Shipyard.
         </CardFrameDescription>
         <CardFrameAction>
           <Button size="xs" variant={pending ? "default" : "outline"} disabled={!report || !pending || !!busy} onClick={() => change("all", true, { skills: "all", agent: "all" })}>
@@ -93,9 +96,9 @@ export function SkillsPanel({ box, location, className, hideTitle }: { box: stri
       </CardFrameHeader>
 
       <div className="border-t">
-        <div className="grid grid-cols-[minmax(0,1fr)_7.5rem_7.5rem] items-center border-b px-4 py-1.5 text-[11px] text-muted-foreground">
+        <div style={grid} className="grid items-center border-b px-4 py-1.5 text-[11px] text-muted-foreground">
           <span>Skill</span>
-          {(["claude", "codex"] as const).map((a) => (
+          {agents.map((a) => (
             <span key={a} className="flex items-center gap-1.5">
               <AgentIcon agent={a} className="size-3" />
               {agentNames[a]}
@@ -109,7 +112,7 @@ export function SkillsPanel({ box, location, className, hideTitle }: { box: stri
           </div>
         )}
         {report?.skills.map((s) => (
-          <div key={s.name} className="grid grid-cols-[minmax(0,1fr)_7.5rem_7.5rem] items-center gap-y-1 border-b px-4 py-2.5 last:border-b-0">
+          <div key={s.name} style={grid} className="grid items-center gap-y-1 border-b px-4 py-2.5 last:border-b-0">
             <div className="min-w-0 pr-3">
               <div className="flex items-baseline gap-2">
                 <span className="font-medium font-mono text-[12.5px]">{s.name}</span>
@@ -119,7 +122,7 @@ export function SkillsPanel({ box, location, className, hideTitle }: { box: stri
                 {skillSummary(s)}
               </p>
             </div>
-            {(["claude", "codex"] as const).map((a) => {
+            {agents.map((a) => {
               const key = `${s.name}:${a}`;
               return (
                 <StateCell
@@ -138,8 +141,8 @@ export function SkillsPanel({ box, location, className, hideTitle }: { box: stri
       </div>
 
       <CardFrameFooter className="flex flex-wrap items-center justify-between gap-3 border-t px-4 py-2.5">
-        <span className="min-w-0 truncate font-mono text-[11px] text-muted-foreground" title={dirs ? `${dirs.claude}\n${dirs.codex}` : undefined}>
-          {dirs ? `${shortDir(dirs.claude)} · ${shortDir(dirs.codex)}` : " "}
+        <span className="min-w-0 truncate font-mono text-[11px] text-muted-foreground">
+          {dirs ? agents.map((a) => shortDir(dirs[a] ?? "")).join(" · ") : " "}
         </span>
         {target === "project" && (
           <label className="flex cursor-pointer items-center gap-2 text-muted-foreground text-xs">

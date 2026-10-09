@@ -4,6 +4,8 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { AgentIcon, StateGlyph } from "@/components/agent-glyph";
 import { DitherBand } from "@/components/art/dither-band";
 import { TaskComposer } from "@/components/conversation/task-composer";
+import { OpenCodeControls } from "@/components/conversation/opencode-controls";
+import { boxOffline, enqueue } from "@/lib/queue";
 import { AttachmentChips, useAttachments } from "@/components/conversation/attachments";
 import { HARBOUR, HARBOUR_MUTE, useHarbourLight } from "@/components/art/harbour-art";
 import { Scene, type SceneName } from "@/components/art/scenes";
@@ -80,7 +82,7 @@ export function ConversationPane({ box, session, agent: remembered, visible, onS
   const state = gone ? "exited" : s ? sessionState(s, stats) : undefined;
   const [attempt, setAttempt] = useState(0);
   const feed = useTranscriptFeed(box, session, s?.dir, visible && !mock && !away, attempt);
-  const ask = useAsk(box, session, !mock && state === "waiting", s?.state_since);
+  const ask = useAsk(box, session, !mock && state === "waiting" && (!s || agentOf(s) !== "opencode"), s?.state_since);
   const [answered, setAnswered] = useState<{ at?: string; key: string }>();
   // A form of questions the agent asks (Claude Code's AskUserQuestion),
   // from its record: the chat draws it whole and the box fills it in. stuck
@@ -122,8 +124,8 @@ export function ConversationPane({ box, session, agent: remembered, visible, onS
   const agent = (s ? agentOf(s) : undefined) ?? remembered ?? guessAgent(session);
   // While it works: the reply it is writing and its status line, from its
   // screen (lib/draft); a box without drafts gives its latest words.
-  const drafts = useDraft({ box, session, agent, enabled: visible && !away && state === "running", mock });
-  const onScreen = useScreenStatus(box, session, agent, visible && !mock && !away && state === "running" && !drafts.supported);
+  const drafts = useDraft({ box, session, agent, enabled: visible && !away && state === "running" && agent !== "opencode", mock });
+  const onScreen = useScreenStatus(box, session, agent, visible && !mock && !away && state === "running" && !drafts.supported && agent !== "opencode");
   const last = useConversations((st) => st.last[key]);
   const who = agent === "claude" ? "Claude" : agent ? agentLabel(agent) : "The agent";
   const [stuck, setStuck] = useState<{ at?: string; why: string }>();
@@ -249,7 +251,7 @@ export function ConversationPane({ box, session, agent: remembered, visible, onS
   }, [answered, s?.state_since, state, forWords]);
   const staleNow = !!stale && stale === s?.state_since;
   const recognised = state === "waiting" && !staleNow && (answerable || (!formAsk && !ask?.form && (ask ? !!ask.choices.length : !!s?.ask?.tool)));
-  const live = useLiveScreen({ box, session, agent, enabled: visible && !mock && !away && !!s && state !== "exited" && !recognised, running: state === "running", nudge });
+  const live = useLiveScreen({ box, session, agent, enabled: visible && !mock && !away && !!s && state !== "exited" && !recognised && agent !== "opencode", running: state === "running", nudge });
 
   // Readable agents may have nothing to show before their first prompt;
   // a new conversation is not a dead end.
@@ -356,7 +358,7 @@ export function ConversationPane({ box, session, agent: remembered, visible, onS
     }
   };
 
-  const reply = async (text: string) => {
+  const reply = async (text: string, files?: { uri: string; name?: string }[]) => {
     if (mock && state !== "running") {
       useConversations.getState().push(key, { kind: "user", id: `u${Date.now()}`, text });
       void finishTurn(box, session);
@@ -365,8 +367,14 @@ export function ConversationPane({ box, session, agent: remembered, visible, onS
     if (!client) return;
     // Typed for the person, at once when the agent waits for them, else
     // held until it is idle; the transcript shows it once the agent reads it.
-    if (idem.current?.text !== text) idem.current = { text, key: `app-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}` };
-    const r = await boxApi.send(client, box, session, text, true, { ...(state === "waiting" ? { when: "now", force: true } : { when: "idle" }), idem_key: idem.current.key });
+    const payload = JSON.stringify([text, files]);
+    if (idem.current?.text !== payload) idem.current = { text: payload, key: crypto.randomUUID() };
+    if (agent === "opencode" && boxOffline(box)) {
+      await enqueue({ id: idem.current.key, box, session, text, native: { idem_key: idem.current.key, files } });
+      idem.current = undefined;
+      return;
+    }
+    const r = await boxApi.send(client, box, session, text, true, { ...(state === "waiting" && agent !== "opencode" ? { when: "now", force: true } : { when: "idle" }), idem_key: idem.current.key, files });
     idem.current = undefined;
     if (r.queued) queue.refresh();
     // A command ("/model", "!ls") shows as itself once the agent runs it;
@@ -489,7 +497,7 @@ export function ConversationPane({ box, session, agent: remembered, visible, onS
   }
   if (!shown.length && (mock || feed === "ready" || feed === "none") && state !== "running" && state !== "waiting" && !live.show) {
     const wt = s ? worktreeOf(locations, s) : undefined;
-    return <FirstPrompt box={box} session={session} agent={agent} name={wt ? (wt.worktree.main ? wt.location.name : wt.worktree.name) : session} branch={wt?.worktree.branch} onSend={reply} onFail={fail} />;
+    return <FirstPrompt box={box} session={session} agent={agent} name={wt ? (wt.worktree.main ? wt.location.name : wt.worktree.name) : session} branch={wt?.worktree.branch} onSend={reply} onFail={fail} onShowTerminal={onShowTerminal} />;
   }
 
   return (
@@ -614,7 +622,7 @@ function CommentsStrip({ count, who, onSend }: { count: number; who: string; onS
 // (components/conversation/attachments), and their paths go with the reply.
 // "/" and "@" open the agent's commands and the worktree's files
 // (command-menu).
-function Reply({ onSend, onFail, who, mode, blocked, hint, attach, agent }: { onSend(text: string): Promise<void>; onFail(err: unknown): void; who: string; mode: "send" | "queue" | "answer"; blocked?: boolean; hint?: string; attach?: AttachTarget; agent?: string }) {
+function Reply({ onSend, onFail, who, mode, blocked, hint, attach, agent }: { onSend(text: string, files?: { uri: string; name?: string }[]): Promise<void>; onFail(err: unknown): void; who: string; mode: "send" | "queue" | "answer"; blocked?: boolean; hint?: string; attach?: AttachTarget; agent?: string }) {
   const [text, setText] = useState("");
   const att = useAttachments(attach);
   const menu = useComposerMenu({ box: attach?.box, session: attach && "session" in attach ? attach.session : undefined, agent, text, setText });
@@ -625,12 +633,13 @@ function Reply({ onSend, onFail, who, mode, blocked, hint, attach, agent }: { on
   const recall = usePromptRecall(attach?.box, to, text, setText, input);
   // Sends what is typed, or a draft put in from elsewhere (a quote).
   const go = (draft = text) => {
-    const t = withAttachments(draft.trim(), att.paths);
+    const t = agent === "opencode" ? draft.trim() : withAttachments(draft.trim(), att.paths);
+    const files = agent === "opencode" ? att.paths.map((path) => { const uri = new URL("file:///"); uri.pathname = path.split("/").map(encodeURIComponent).join("/"); return { uri: uri.href, name: path.split("/").pop() }; }) : undefined;
     if (!(draft.trim() || att.paths.length) || att.blocker || blocked) return;
     if (attach?.box && to) noteSent(attach.box, to, draft.trim());
     const kept = draft;
     setText("");
-    onSend(t).then(att.clear, (err: unknown) => {
+    onSend(t, files).then(att.clear, (err: unknown) => {
       // What was typed comes back (and the attachments stay), so nothing is
       // lost.
       setText((now) => now || kept);
@@ -777,7 +786,7 @@ const boxWord = (state?: string) => (state === "untrusted" ? "unreachable" : (st
 // FirstPrompt is an agent that hasn't been asked anything yet: the harbour
 // band, the worktree, and the composer for its first task, as everywhere
 // work starts.
-function FirstPrompt({ box, session, agent, name, branch, onSend, onFail }: { box: string; session: string; agent?: string; name: string; branch?: string; onSend(text: string): Promise<void>; onFail(err: unknown): void }) {
+function FirstPrompt({ box, session, agent, name, branch, onSend, onFail, onShowTerminal }: { box: string; session: string; agent?: string; name: string; branch?: string; onSend(text: string, files?: { uri: string; name?: string }[]): Promise<void>; onFail(err: unknown): void; onShowTerminal(): void }) {
   const light = useHarbourLight();
   return (
     <div className="absolute inset-0 overflow-y-auto bg-background">
@@ -792,6 +801,7 @@ function FirstPrompt({ box, session, agent, name, branch, onSend, onFail }: { bo
             </div>
           </header>
           <TaskComposer to={{ box, session, agent }} onSend={onSend} onFail={onFail} autoFocus />
+          {agent === "opencode" && <OpenCodeControls box={box} session={session} visible onShowTerminal={onShowTerminal} />}
           {/* What runs in the worktree, and plugins' sections. */}
           <SessionWorktreeSections box={box} session={session} className="mt-6" />
         </div>

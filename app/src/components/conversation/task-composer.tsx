@@ -56,7 +56,7 @@ export interface TaskComposerProps {
   fixed?: { box: string; location: string; at: string; name: string; branch?: string };
   // The first prompt for this one agent, ready in its worktree.
   to?: { box: string; session: string; agent?: string };
-  onSend?(text: string): Promise<void>;
+  onSend?(text: string, files?: { uri: string; name?: string }[]): Promise<void>;
   // How a failed first prompt is told (the pane's toast with next steps).
   onFail?(err: unknown): void;
   // In the dialog: its options start open, and it says when it is done.
@@ -351,6 +351,10 @@ function StartBody({ draft, text, setText, tabs, fixed, dialog, autoFocus, place
 
   const submit = async (trustFirst = false) => {
     if (blocker || busy) return;
+    if (files.paths.length && picks.some((p) => p.agent === "opencode") && (attempts || from || template?.command)) {
+      setError("Attach files in the OpenCode conversation after starting an attempt, handoff or custom command.");
+      return;
+    }
     setBusy(true);
     setError(undefined);
     if (trustFirst && pendingTrust) {
@@ -363,8 +367,10 @@ function StartBody({ draft, text, setText, tabs, fixed, dialog, autoFocus, place
       }
     }
     const values = { ...wt.vars, name: name || "" };
+    const native = picks.length === 1 && picks[0].agent === "opencode" && !from && !template?.command;
     const d: StartDraft = {
-      text: noAgent ? "" : withAttachments(fillTemplate(text.trim(), values) ?? text.trim(), files.paths),
+      text: noAgent ? "" : withAttachments(fillTemplate(text.trim(), values) ?? text.trim(), native ? [] : files.paths),
+      files: native ? files.paths.map((path) => { const uri = new URL("file:///"); uri.pathname = path.split("/").map(encodeURIComponent).join("/"); return { uri: uri.href, name: path.split("/").pop() }; }) : undefined,
       box,
       location: locName,
       where,
@@ -743,10 +749,15 @@ function SendBody({ draft, text, setText, tabs, dialog, autoFocus, onDone, onKin
 
   const submit = () => {
     if (blocker) return;
+    if (files.paths.length && chosen.some((e) => agentOf(e.session) === "opencode") && (v.loop || chosen.some((e) => e.session.dir !== first.session.dir))) {
+      toastError(new Error("Native OpenCode attachments need agents in the same worktree. Attach directly in the conversation for a loop."), { title: "Couldn't send it" });
+      return;
+    }
     const title = prompt?.title ?? (text.trim().split("\n")[0].slice(0, 60) || "Prompt");
     const ok = sendWork({
       targets: chosen.map((e) => ({ box: e.box, session: e.session.name })),
-      texts: chosen.map((e) => withAttachments(textFor(e), files.paths)),
+      texts: chosen.map((e) => withAttachments(textFor(e), agentOf(e.session) === "opencode" ? [] : files.paths)),
+      files: chosen.map((e) => agentOf(e.session) === "opencode" && files.paths.length ? files.paths.map((path) => { const uri = new URL("file:///"); uri.pathname = path.split("/").map(encodeURIComponent).join("/"); return { uri: uri.href, name: path.split("/").pop() }; }) : undefined),
       title,
       wait: v.wait && !v.loop,
       queueOffline: v.queueOffline,
@@ -877,7 +888,8 @@ function ToBody({ to, onSend, onFail, autoFocus, className }: TaskComposerProps 
     if (!ready || busy || att.blocker || !onSend) return;
     setBusy(true);
     try {
-      await onSend(withAttachments(text.trim(), att.paths));
+      const nativeFiles = to.agent === "opencode" ? att.paths.map((path) => { const uri = new URL("file:///"); uri.pathname = path.split("/").map(encodeURIComponent).join("/"); return { uri: uri.href, name: path.split("/").pop() }; }) : undefined;
+      await onSend(to.agent === "opencode" ? text.trim() : withAttachments(text.trim(), att.paths), nativeFiles);
       setText("");
       att.clear();
     } catch (err) {

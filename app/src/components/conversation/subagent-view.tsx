@@ -217,6 +217,9 @@ export function HelperChat({ box, session, h, wide }: { box: string; session: st
   const [error, setError] = useState<string>();
   const [attempt, setAttempt] = useState(0);
   const next = useRef(0);
+  const generation = useRef<string>(undefined);
+  const [cursor, setCursor] = useState<string | null>();
+  const [loadingOlder, setLoadingOlder] = useState(false);
   const running = h.state === "running";
 
   useEffect(() => {
@@ -229,8 +232,11 @@ export function HelperChat({ box, session, h, wide }: { box: string; session: st
       try {
         const r = await historyApi.helperTranscript(client, box, session, h.id, next.current);
         if (!alive) return;
+        const fresh = !!generation.current && generation.current !== r.gen;
+        generation.current = r.gen;
+        if (r.source === "opencode") setCursor((old) => fresh || old === undefined ? r.cursor ?? null : old);
         setItems((list) => {
-          const out = [...list];
+          const out = fresh ? [] : [...list];
           const at = new Map(out.map((it, i) => [it.id, i]));
           for (const it of r.items ?? []) {
             const i = at.get(it.id);
@@ -279,6 +285,17 @@ export function HelperChat({ box, session, h, wide }: { box: string; session: st
   return (
     <div className="min-h-0 flex-1 overflow-y-auto px-6 pt-5 pb-8">
       <div className={cn(wide && "mx-auto w-full max-w-(--berth-chat-w)")}>
+      {cursor && items.length < 1000 && <Button size="xs" variant="outline" disabled={loadingOlder} onClick={() => {
+        if (!client) return;
+        const gen = generation.current;
+        setLoadingOlder(true);
+        void historyApi.helperCursor(client, box, session, h.id, cursor).then((page) => {
+          if (generation.current !== gen) return;
+          setItems((list) => { const ids = new Set(list.map((item) => item.id)); return [...page.items.filter((item) => !ids.has(item.id)), ...list].slice(-1000); });
+          setCursor(page.cursor ?? null);
+        }, (err) => setError(errorMessage(err))).finally(() => setLoadingOlder(false));
+      }}>Load older helper messages</Button>}
+      {state === "ready" && error && <p role="alert">{error}</p>}
       {prompt && <AskedBy text={prompt} />}
       {state === "loading" && (
         <div className="flex h-32 items-center justify-center text-muted-foreground text-sm">

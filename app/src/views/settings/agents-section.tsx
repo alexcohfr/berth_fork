@@ -3,6 +3,7 @@ import { useState } from "react";
 
 import { AgentIcon } from "@/components/agent-glyph";
 import { SkillsPanel } from "@/components/skills/skills-panel";
+import { OpenCodeMachineSettings } from "@/components/conversation/opencode-settings";
 import { Tooltip, TooltipPopup, TooltipTrigger } from "@/components/ui/tooltip";
 import type { AgentPreset } from "@/lib/api";
 import { NONE, useStore } from "@/lib/store";
@@ -31,6 +32,7 @@ export function AgentsSection() {
   const data = useStore((s) => s.boxes);
   const online = boxes.filter((b) => b.state === "online");
   const [skillsBox, setSkillsBox] = useState<string>();
+  const [nativeTask, setNativeTask] = useState("");
   const shownSkills = online.some((b) => b.name === skillsBox) ? skillsBox! : online[0]?.name;
 
   // Every agent any box has, built-ins first, then each box's own.
@@ -111,6 +113,11 @@ export function AgentsSection() {
           <SkillsPanel key={shownSkills} box={shownSkills} hideTitle />
         </section>
       )}
+
+      <SettingsGroup title="OpenCode on this machine" description="Inspect a running task's real OpenCode runtime, configuration and connections.">
+        <select aria-label="OpenCode runtime task" value={nativeTask} onChange={(e) => setNativeTask(e.target.value)} className="w-full rounded-md border bg-background p-2 text-sm"><option value="">Choose a running OpenCode task…</option>{online.flatMap((b) => (data[b.name]?.sessions ?? []).filter((s) => !s.exited && (s.agent === "opencode" || s.preset === "opencode")).map((s) => <option key={`${b.name}/${s.name}`} value={JSON.stringify([b.name, s.name])}>{b.name} · {s.name}</option>))}</select>
+        {nativeTask && <OpenCodeMachineSettings key={nativeTask} box={(JSON.parse(nativeTask) as string[])[0]} session={(JSON.parse(nativeTask) as string[])[1]} />}
+      </SettingsGroup>
 
       {boxes.length > online.length && <p className="text-muted-foreground text-xs">Offline boxes are listed once they reconnect.</p>}
     </SettingsPage>

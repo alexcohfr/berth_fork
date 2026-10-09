@@ -9,7 +9,7 @@ import { openComposer, useComposer } from "@/lib/composer";
 import { boxOffline, enqueue, sendFailure } from "@/lib/queue";
 import { boxHasRuns, runs as runsApi, scheduleRuns } from "@/lib/runs";
 import { terminal, walkSteps } from "@/lib/orchestrate-core";
-import type { Run } from "@/lib/api";
+import { boxApi, type Run } from "@/lib/api";
 import { meaningfulTail } from "@/lib/screen";
 import { useStore } from "@/lib/store";
 
@@ -25,6 +25,8 @@ export interface RunRow {
   box: string;
   session: string;
   text: string;
+  files?: { uri: string; name?: string }[];
+  idem_key?: string;
   state: RowState;
   // The box's broadcast run this row is part of, on a box with runs.
   run?: string;
@@ -88,7 +90,7 @@ export async function queueRow(runId: string, i: number) {
   const row = useBroadcastRun.getState().run?.rows[i];
   if (!row || useBroadcastRun.getState().run?.id !== runId) return;
   try {
-    await enqueue({ box: row.box, session: row.session, text: row.text, toast: false });
+    await enqueue({ id: row.idem_key, box: row.box, session: row.session, text: row.text, toast: false, native: row.files ? { idem_key: row.idem_key!, when: "idle", files: row.files } : undefined });
     patch(runId, i, { state: "deferred", error: undefined });
   } catch (err) {
     patch(runId, i, { state: "failed", error: plainError(err) });
@@ -97,12 +99,12 @@ export async function queueRow(runId: string, i: number) {
 
 // startBroadcast sends each item in turn; with queueOffline, prompts for
 // agents whose box is away go to the offline queue instead of failing.
-export function startBroadcast(o: { title: string; wait: boolean; timeout?: number; queueOffline?: boolean; items: { box: string; session: string; text: string }[] }) {
+export function startBroadcast(o: { title: string; wait: boolean; timeout?: number; queueOffline?: boolean; items: { box: string; session: string; text: string; files?: { uri: string; name?: string }[] }[] }) {
   useBroadcastRun.getState().controller?.abort();
   const controller = new AbortController();
   const { signal } = controller;
   const id = Math.random().toString(36).slice(2);
-  const rows: RunRow[] = o.items.map((it) => ({ ...it, state: "queued" }));
+  const rows: RunRow[] = o.items.map((it) => ({ ...it, idem_key: it.files ? crypto.randomUUID() : undefined, state: "queued" }));
   useBroadcastRun.setState({ run: { id, title: o.title, wait: o.wait, rows, done: false }, controller });
 
   void (async () => {
@@ -112,7 +114,7 @@ export function startBroadcast(o: { title: string; wait: boolean; timeout?: numb
     // and keeps going if the app quits. Other boxes are sent to from here.
     const onBox = new Map<string, number[]>();
     for (const [i, it] of o.items.entries()) {
-      if (boxHasRuns(it.box) && !boxOffline(it.box)) onBox.set(it.box, [...(onBox.get(it.box) ?? []), i]);
+      if (!it.files && boxHasRuns(it.box) && !boxOffline(it.box)) onBox.set(it.box, [...(onBox.get(it.box) ?? []), i]);
     }
     for (const [box, rows] of onBox) waits.push(broadcastRun(id, box, rows, o, signal));
     for (const [i, it] of o.items.entries()) {
@@ -131,7 +133,9 @@ export function startBroadcast(o: { title: string; wait: boolean; timeout?: numb
       try {
         // when "now": the box refuses to type into an agent at a question,
         // whose answer is the person's to give.
-        sent = await send(it.box, it.session, it.text, { when: "now" });
+        const client = useStore.getState().client;
+        if (it.files && !client) throw new Error("Shipyard disconnected");
+        sent = it.files ? await boxApi.send(client!, it.box, it.session, it.text, true, { when: "idle", idem_key: rows[i].idem_key, files: it.files }) : await send(it.box, it.session, it.text, { when: "now" });
       } catch (err) {
         if (isWaitingRefusal(err)) {
           patch(id, i, { state: "waiting", error: "Not sent: it is waiting for you" });

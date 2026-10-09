@@ -411,6 +411,11 @@ func (h *runHost) startAgent(ctx context.Context, x *runs.StepCtx) runs.Result {
 	if err := h.b.beforeAs(ctx, origOf(x), "session.start", map[string]any{"location": where, "path": dir, "command": command, "agent": agent}); err != nil {
 		return fail(err)
 	}
+	if agent == "opencode" && prompt != "" {
+		if err := b.beforeAs(ctx, origOf(x), "session.send", map[string]any{"name": name, "path": dir, "location": where, "action": "opencode.first-prompt"}); err != nil {
+			return fail(err)
+		}
+	}
 	// The prompt goes on the command line: say it was sent first, so the
 	// ledger has its turn waiting when the agent's first hook arrives, and
 	// the next wait has a turn to wait on.
@@ -424,9 +429,15 @@ func (h *runHost) startAgent(ctx context.Context, x *runs.StepCtx) runs.Result {
 	if err != nil {
 		return fail(err)
 	}
-	b.Events.Publish(events.Event{Type: "session.started", Box: b.Name, Origin: origOf(x), Data: map[string]any{"name": sess.Name, "location": where, "path": dir, "command": command, "agent": agentFor(sess), "run": x.Run.ID}})
+	eventCommand := command
+	if controlAgent(sess) == "opencode" {
+		eventCommand = "opencode mini"
+	}
+	b.Events.Publish(events.Event{Type: "session.started", Box: b.Name, Origin: origOf(x), Data: map[string]any{"name": sess.Name, "location": where, "path": dir, "command": eventCommand, "agent": agentFor(sess), "run": x.Run.ID}})
 	sess.Agent = agentFor(sess)
-	b.beginStartup(origOf(x), sess)
+	if controlAgent(sess) != "opencode" {
+		b.beginStartup(origOf(x), sess)
+	}
 	out := "started " + sess.Name + " in " + where
 	if native != "" {
 		out += " (" + native + ")"

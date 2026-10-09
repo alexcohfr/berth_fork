@@ -2,7 +2,7 @@ import { useEffect, useRef, useState } from "react";
 
 import { boxApi, type Client, type QueuedPrompt } from "@/lib/api";
 import { keyOf, offOf, useConversations } from "@/lib/conversation-store";
-import { dropOlder, historyApi } from "@/lib/history";
+import { dropOlder, historyApi, nativeHistory } from "@/lib/history";
 import { useEventLog } from "@/lib/events";
 import { choicesIn, type Choice, keysOnly, questionFormIn } from "@/lib/screen";
 import { useStore } from "@/lib/store";
@@ -35,6 +35,7 @@ export interface TranscriptResult {
   reset?: boolean;
   start?: number;
   file?: string;
+  cursor?: string | null;
 }
 
 // The record each chat shows (newer boxes), kept while the app runs: a
@@ -146,7 +147,31 @@ export function useTranscriptFeed(box: string, session: string, dir: string | un
           setState("none");
           return;
         }
-        if (r.gen !== undefined) {
+        if (r.source === "opencode") {
+          const identity = r.gen ?? r.file ?? "opencode";
+          const was = fileOf.get(key);
+          const fresh = !!was && was !== identity;
+          const held = useConversations.getState().items[key] ?? [];
+          const knownIDs = new Set(held.map((item) => item.id));
+          let nativeItems = r.items ?? [];
+          let cursor = r.cursor;
+          // The event stream has no replay. Walk durable pages until they meet
+          // the held window, rather than stitching two windows across a hole.
+          for (let page = 0; !fresh && held.length && cursor && !nativeItems.some((item) => knownIDs.has(item.id)) && page < MAX_GAP_PAGES; page++) {
+            const older = await historyApi.cursor(client, box, session, cursor);
+            if (!alive) return;
+            if (older.gen && older.gen !== identity) { again = true; return; }
+            nativeItems = [...older.items, ...nativeItems];
+            cursor = older.cursor;
+          }
+          const gap = held.length > 0 && !nativeItems.some((item) => knownIDs.has(item.id));
+          nativeHistory(key, cursor ?? null, fresh || gap, identity);
+          const windowIDs = new Set(nativeItems.map((item) => item.id));
+          const overlap = held.findIndex((item) => windowIDs.has(item.id));
+          useConversations.getState().resync(key, [...(!fresh && overlap > 0 ? held.slice(0, overlap) : []), ...nativeItems], 0, true);
+          fileOf.set(key, identity);
+          gen.current = identity;
+        } else if (r.gen !== undefined) {
           // A whole window: the first read, or one the box read afresh (it
           // restarted, let the conversation go while no one looked, or the
           // agent rewound). It is named as before, so the chat keeps what

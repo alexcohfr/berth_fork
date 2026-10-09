@@ -319,6 +319,22 @@ func (b *Box) listCommands(w http.ResponseWriter, r *http.Request) error {
 		return err
 	}
 	agent := sessionAgent(sess)
+	if agent == "opencode" {
+		ep, owner, err := b.openCodeRuntime(r.Context(), sess)
+		if err != nil {
+			return err
+		}
+		catalog, err := openCodeCatalogAt(r.Context(), ep, owner.Directory)
+		if err != nil {
+			return err
+		}
+		cat := CommandCatalog{Agent: agent, Version: ep.Version, Commands: []Command{}}
+		for _, c := range catalog.Commands {
+			cat.Commands = append(cat.Commands, Command{Name: "/" + c.Name, Description: c.Description, Kind: "custom", Args: "arguments"})
+		}
+		writeJSON(w, cat)
+		return nil
+	}
 	key := agent + "\x00" + sess.Dir
 	if v, ok := commandsCache.Load(sess.Name); ok {
 		if e := v.(commandsEntry); e.key == key && time.Since(e.at) < commandsTTL && r.URL.Query().Get("fresh") == "" {

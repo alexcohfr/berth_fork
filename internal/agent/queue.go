@@ -12,6 +12,7 @@ import (
 	"net/http"
 	"net/url"
 	"os"
+	"reflect"
 	"regexp"
 	"sort"
 	"strings"
@@ -77,10 +78,11 @@ var (
 
 // QueueItem is one prompt waiting for its box.
 type QueueItem struct {
-	ID      string `json:"id"`
-	Box     string `json:"box"`
-	Session string `json:"session"`
-	Text    string `json:"text"`
+	Native  *box.SendRequest `json:"native,omitempty"`
+	ID      string           `json:"id"`
+	Box     string           `json:"box"`
+	Session string           `json:"session"`
+	Text    string           `json:"text"`
 	// Enter presses Enter after the text, as a send does by default.
 	Enter bool `json:"enter"`
 	// Wait holds the prompt while the agent is mid-turn (state running),
@@ -102,12 +104,13 @@ type QueueItem struct {
 // QueueRequest adds a prompt. ID is optional: sending the same ID again
 // returns the item already queued, so a client may retry an enqueue.
 type QueueRequest struct {
-	ID      string `json:"id,omitempty"`
-	Box     string `json:"box"`
-	Session string `json:"session"`
-	Text    string `json:"text"`
-	Wait    *bool  `json:"wait,omitempty"`
-	Enter   *bool  `json:"enter,omitempty"`
+	Native  *box.SendRequest `json:"native,omitempty"`
+	ID      string           `json:"id,omitempty"`
+	Box     string           `json:"box"`
+	Session string           `json:"session"`
+	Text    string           `json:"text"`
+	Wait    *bool            `json:"wait,omitempty"`
+	Enter   *bool            `json:"enter,omitempty"`
 }
 
 // QueueChange retargets or edits a queued or failed prompt; it goes back in
@@ -125,7 +128,7 @@ type queueBoxes interface {
 	online(box string) bool
 	sessions(ctx context.Context, box string) ([]box.Session, error)
 	wait(ctx context.Context, box, session string, states []string, timeout time.Duration) (box.WaitResult, error)
-	send(ctx context.Context, box, session, text string, enter bool) error
+	send(ctx context.Context, box, session string, req box.SendRequest) error
 }
 
 // unsentError is a request that never reached the box.
@@ -315,11 +318,14 @@ func (q *promptQueue) add(req QueueRequest) (QueueItem, error) {
 	if !queueSessionName.MatchString(req.Session) {
 		return QueueItem{}, fmt.Errorf("%q is not a session name", req.Session)
 	}
-	if req.Text == "" {
+	if req.Text == "" && (req.Native == nil || len(req.Native.Files)+len(req.Native.Skills) == 0) {
 		return QueueItem{}, errors.New("nothing to send")
 	}
 	if len(req.Text) > maxQueuedText {
 		return QueueItem{}, fmt.Errorf("the prompt is longer than %d KB", maxQueuedText>>10)
+	}
+	if req.Native != nil && (len(req.Native.IdemKey) > 256 || len(req.Native.Files) > 16 || len(req.Native.Skills) > 16) {
+		return QueueItem{}, errors.New("native prompt exceeds its budget")
 	}
 	if !q.boxes.known(req.Box) {
 		return QueueItem{}, fmt.Errorf("no paired box named %q", req.Box)
@@ -329,6 +335,9 @@ func (q *promptQueue) add(req QueueRequest) (QueueItem, error) {
 		if i := q.indexLocked(req.ID); i >= 0 {
 			it := q.items[i]
 			q.mu.Unlock()
+			if (it.Native != nil || req.Native != nil) && (it.Box != req.Box || it.Session != req.Session || it.Text != req.Text || !reflect.DeepEqual(it.Native, req.Native)) {
+				return QueueItem{}, errors.New("request ID belongs to a different native prompt")
+			}
 			return it, nil
 		}
 	}
@@ -338,6 +347,7 @@ func (q *promptQueue) add(req QueueRequest) (QueueItem, error) {
 	}
 	q.seq++
 	it := QueueItem{
+		Native:  req.Native,
 		ID:      req.ID,
 		Box:     req.Box,
 		Session: req.Session,
@@ -406,6 +416,10 @@ func (q *promptQueue) change(id string, ch QueueChange) (QueueItem, error) {
 		return QueueItem{}, errQueueItemBusy
 	}
 	oldBox := it.Box
+	if it.Native != nil && ((ch.Box != nil && *ch.Box != it.Box) || (ch.Session != nil && *ch.Session != it.Session) || (it.Attempts > 0 && ch.Text != nil && *ch.Text != it.Text)) {
+		q.mu.Unlock()
+		return QueueItem{}, errors.New("native delivery must keep its identity and uploaded files; discard it and prepare a new prompt to change destination or an attempted payload")
+	}
 	if ch.Box != nil {
 		it.Box = *ch.Box
 	}
@@ -490,7 +504,20 @@ func (q *promptQueue) sendClaimed(it QueueItem) QueueItem {
 	defer q.sends.Done()
 	defer q.sending.Done()
 	ctx, cancel := context.WithTimeout(q.ctx, queueSendLimit)
-	err := q.boxes.send(ctx, it.Box, it.Session, it.Text, it.Enter)
+	req := box.SendRequest{Text: it.Text, Enter: &it.Enter, When: "now", IdemKey: "queue-" + it.ID}
+	if it.Native != nil {
+		req = *it.Native
+		req.Text = it.Text
+		req.Enter = &it.Enter
+		if req.When == "" {
+			req.When = "now"
+		}
+		req.Force = false
+		if req.IdemKey == "" {
+			req.IdemKey = "queue-" + it.ID
+		}
+	}
+	err := q.boxes.send(ctx, it.Box, it.Session, req)
 	cancel()
 
 	q.mu.Lock()
@@ -792,10 +819,10 @@ func (b agentBoxes) wait(ctx context.Context, name, session string, states []str
 	return out, b.call(ctx, name, http.MethodGet, "/v1/sessions/"+url.PathEscape(session)+"/wait?"+q.Encode(), nil, &out)
 }
 
-func (b agentBoxes) send(ctx context.Context, name, session, text string, enter bool) error {
+func (b agentBoxes) send(ctx context.Context, name, session string, req box.SendRequest) error {
 	// when:"now" makes a box refuse to type into an agent waiting for
 	// someone, rather than answer its question for them.
-	return b.call(ctx, name, http.MethodPost, "/v1/sessions/"+url.PathEscape(session)+"/send", map[string]any{"text": text, "enter": enter, "when": "now"}, nil)
+	return b.call(ctx, name, http.MethodPost, "/v1/sessions/"+url.PathEscape(session)+"/send", req, nil)
 }
 
 // queueRoutes serves the queue on the agent's socket and, through it, to

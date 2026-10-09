@@ -533,6 +533,13 @@ func userSkills(home, agent string, names []string, install bool) ([]string, err
 // home: for Claude Code, the furthest behind of its account folders, so an
 // account without it shows it missing.
 func UserSkillStatus(home, agent, name string) (SkillState, error) {
+	if agent == "opencode" {
+		dir, err := UserSkillDir(home, agent)
+		if err != nil {
+			return "", err
+		}
+		return skillStatusIn(dir, name)
+	}
 	if agent != "claude" {
 		return SkillStatus(home, agent, name)
 	}

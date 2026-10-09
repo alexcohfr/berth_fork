@@ -115,11 +115,13 @@ func isKey(text string) bool {
 // person. Requests without When, from older clients, type at once as
 // before. IdemKey makes a retried send return the turn it already made.
 type SendRequest struct {
-	Text    string `json:"text"`
-	Enter   *bool  `json:"enter,omitempty"`
-	When    string `json:"when,omitempty"`
-	Force   bool   `json:"force,omitempty"`
-	IdemKey string `json:"idem_key,omitempty"`
+	Text    string          `json:"text"`
+	Enter   *bool           `json:"enter,omitempty"`
+	When    string          `json:"when,omitempty"`
+	Force   bool            `json:"force,omitempty"`
+	IdemKey string          `json:"idem_key,omitempty"`
+	Files   []openCodeFile  `json:"files,omitempty"`
+	Skills  []openCodeSkill `json:"skills,omitempty"`
 }
 
 // SendResult names the turn a send started or queued, the journal Seq of
@@ -132,6 +134,7 @@ type SendResult struct {
 	Turn      string    `json:"turn,omitempty"`
 	Seq       int64     `json:"seq,omitempty"`
 	At        time.Time `json:"at"`
+	NativeID  string    `json:"native_id,omitempty"`
 }
 
 // ErrAgentWaiting refuses to type into an agent that waits for someone.
@@ -171,18 +174,20 @@ func (b *Box) sendPrompt(ctx context.Context, name string, req SendRequest, orig
 		return SendResult{}, badRequest("when must be now or idle")
 	}
 	defer b.lockSend(name)()
-	if b.Turns != nil {
-		if tr, ok := b.Turns.ByIdem(name, req.IdemKey); ok {
-			return SendResult{Sent: tr.State != "queued", Queued: tr.State == "queued", Duplicate: true, Turn: tr.ID, Seq: tr.SentSeq, At: time.Now().UTC()}, nil
-		}
-	}
 	sess, err := b.Sessions.Get(ctx, name)
 	if err != nil {
 		return SendResult{}, err
 	}
 	if sess.Exited {
-		// Typed now or queued for later, nothing would ever read it.
 		return SendResult{}, ErrSessionExited
+	}
+	if controlAgent(sess) == "opencode" {
+		return b.openCodeSend(ctx, sess, req, origin, from)
+	}
+	if b.Turns != nil {
+		if tr, ok := b.Turns.ByIdem(name, req.IdemKey); ok {
+			return SendResult{Sent: tr.State != "queued", Queued: tr.State == "queued", Duplicate: true, Turn: tr.ID, Seq: tr.SentSeq, At: time.Now().UTC()}, nil
+		}
 	}
 	hold := func() (SendResult, error) {
 		tr, err := b.Turns.Queue(name, req.Text, enter, from, req.IdemKey)

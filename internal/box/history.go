@@ -68,6 +68,9 @@ func (b *Box) claudeRecord(r *http.Request) (Session, string, error) {
 // listHelpers answers GET /v1/sessions/{name}/subagents: the helpers the
 // agent started, each with the call that started it and whether it works.
 func (b *Box) listHelpers(w http.ResponseWriter, r *http.Request) error {
+	if sess, err := b.Sessions.Get(r.Context(), r.PathValue("name")); err == nil && controlAgent(sess) == "opencode" {
+		return b.openCodeHelpers(w, r, sess)
+	}
 	sess, path, err := b.claudeRecord(r)
 	if err != nil {
 		var he httpError
@@ -103,6 +106,9 @@ func (b *Box) helperFile(r *http.Request) (Session, string, error) {
 // helperTranscript answers GET …/subagents/{id}/transcript?since=N (or
 // ?before=OFF): a helper's own conversation, read as the session's is.
 func (b *Box) helperTranscript(w http.ResponseWriter, r *http.Request) error {
+	if sess, err := b.Sessions.Get(r.Context(), r.PathValue("name")); err == nil && controlAgent(sess) == "opencode" {
+		return b.openCodeTranscript(w, r, sess)
+	}
 	sess, hp, err := b.helperFile(r)
 	if err != nil {
 		return err
@@ -122,6 +128,9 @@ func (b *Box) helperTranscript(w http.ResponseWriter, r *http.Request) error {
 // helperTool answers GET …/subagents/{id}/tool/{tool}: one of a helper's
 // calls opened up.
 func (b *Box) helperTool(w http.ResponseWriter, r *http.Request) error {
+	if sess, err := b.Sessions.Get(r.Context(), r.PathValue("name")); err == nil && controlAgent(sess) == "opencode" {
+		return b.openCodeToolDetail(w, r, sess)
+	}
 	sess, hp, err := b.helperFile(r)
 	if err != nil {
 		return err
@@ -139,6 +148,8 @@ func (b *Box) helperTool(w http.ResponseWriter, r *http.Request) error {
 
 // ForkRequest starts a new session that goes on from a point in this one.
 type ForkRequest struct {
+	IdemKey string         `json:"idem_key,omitempty"`
+	Files   []openCodeFile `json:"files,omitempty"`
 	// At is the entry to go on from: a prompt's parent (the transcript
 	// item's "parent"), so the fork has everything before that prompt.
 	// Empty starts afresh, as a fork of the first prompt does.
@@ -161,6 +172,9 @@ func (b *Box) forkSession(w http.ResponseWriter, r *http.Request) error {
 	}
 	if req.Open != "" && req.Open != "split" && req.Open != "tab" {
 		return badRequest("open must be split or tab")
+	}
+	if sess, err := b.Sessions.Get(r.Context(), r.PathValue("name")); err == nil && controlAgent(sess) == "opencode" {
+		return b.openCodeFork(w, r, sess, req)
 	}
 	sess, path, err := b.claudeRecord(r)
 	if err != nil {

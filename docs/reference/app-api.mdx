@@ -137,7 +137,7 @@ failed after it went out (the box may have acted on it). The box API:
 | `GET doctor` | `Check[]` |
 | `POST secrets/test` | `{ ref }` → `{ ok, length?, error? }`: resolves a [secret reference](/guides/secrets) on the box now (`op://…` or `env://…`), skipping its cache, and reports whether it could and the value's length, never the value. A malformed reference is `ok: false` with why |
 | `POST secrets/report` | Only on the box's own socket: what `berthd secret exec` resolved for a session or service, which variables resolved and which failed and why, never values |
-| `POST sessions/{name}/send` | `{ text, enter?, when?, force?, idem_key? }` → `{ sent, queued?, duplicate?, turn?, seq?, at }`: types a prompt, or with `when: "idle"` holds it until the agent is idle. With `when`, refused (409) while the agent waits for someone unless `force` ([orchestration](/guides/orchestration#send)) |
+| `POST sessions/{name}/send` | `{ text, enter?, when?, force?, idem_key?, files?, skills? }` → `{ sent, queued?, duplicate?, turn?, native_id?, seq?, at }`: native admission for OpenCode, terminal input for other agents. `when: "idle"` queues in the owning engine. See OpenCode below and [orchestration](/guides/orchestration#send). |
 | `GET sessions/{name}/wait?for=finished,waiting&after=TIME&timeout=10m` | `{ state, timed_out, turn? }`: `after` is an RFC 3339 time, placed in the box's journal order; `timeout` a duration, 1s to 1h (default 10m) |
 | `GET sessions/{name}/turns?limit=N` | `Turn[]`, oldest first: the session's last `N` turns (default 20). A wait's `ask` is what the agent asked for, from its hooks: `{ tool?, input?, why?, message? }`, each at most 300 characters (the command or the file's path, never what it would write) |
 | `GET sessions/{name}/queue` | `{ turn, preview, length, origin?, at }[]`: the prompts held until the agent is idle (`when: "idle"`), oldest first; `preview` is the first 280 characters. The session's `queued` is their count. Boxes that serve it list `queue` in `capabilities` |
@@ -216,6 +216,67 @@ queued?, started?, ended?, waits?, fidelity?, idem_key?, status? }`, with
 
 `GET locations/{name}/config` and `GET env` return secret references as
 written, never their values.
+
+## OpenCode native operations
+
+These box routes require a task linked to its private OpenCode owner. No
+frontend-supplied runtime URL is accepted. Native actions use the current
+`instance` and `session_id` from `GET sessions/{name}/opencode`; stale identities
+return 409. Mutations use Shipyard's applicable `session.send`/`session.start`
+gates. Capabilities come from that runtime's OpenAPI operations.
+
+- `GET sessions/{name}/opencode`: `{ version, instance, directory, session,
+  running, permissions, forms, inbox, compaction, capabilities }`. `session`
+  contains native identity, agent/model, tokens, USD cost and staged revert;
+  `compaction` contains an ID and native status when available.
+- `POST sessions/{name}/opencode/{action}` accepts `{ instance, session_id, … }`.
+  Actions: `permission` (`id`, `decision: once|always|reject`, optional child
+  `target`), `form` (`id`, typed `answer`, optional child `target`), `agent`
+  (`agent`), `model` (`model: { providerID, id, variant? }`), `compact` (stable
+  `msg_` `id`), and `revert-preview|revert-stage|revert-clear|revert-commit`
+  (message `id`). Revert is conversation-only and refuses a busy runtime.
+- `GET sessions/{name}/opencode/catalog`: allowlisted `agents`, `models`,
+  `commands`, `skills` for the owner's directory.
+- `GET sessions/{name}/opencode/conversations?search=TEXT&cursor=OPAQUE`: native
+  project conversations with `data` and `cursor.next`. `POST …/resume` accepts
+  `{ instance, id }`, returns a new Shipyard session and preserves the native ID.
+- `GET sessions/{name}/opencode/settings`: configuration sources, MCP and plugin
+  status, integration methods/connections and resumable auth attempts. Raw
+  config, provider headers and upstream error bodies are not returned.
+- `POST sessions/{name}/opencode/settings`: `{ instance, action, … }` for
+  `reload`; `mcp-connect|mcp-disconnect` (`server`); `key` (`integration`, `key`,
+  optional `answer`); `oauth` (`integration`, `method`, optional `answer`);
+  `oauth-complete|oauth-cancel` (`integration`, `attempt`, optional `code`).
+  Keys/codes travel only in request bodies to OpenCode on the selected box.
+- `GET sessions/{name}/opencode/transfer?scope=project|user` lists portable file
+  paths. `POST` takes `{ instance, action, paths?, files? }`: `export` selects
+  `paths`; `preview` validates destination `files: [{path,content}]` and returns
+  their `before` and `etag`; `apply` checks those etags before writes (412 on
+  conflict). Scope defaults to project; the UI always applies to a project.
+
+For native `send`, `files` is `[{ uri: "file:///absolute/box/path", name? }]`,
+`skills` is `[{ id }]`, and `idem_key` must be retained across retries. Maximums:
+64 KB text, 16 files, 16 skills, 256-byte key. `when: "idle"` uses native queue
+delivery; other values steer. `when: "now"` refuses pending user requests unless
+forced. Structured uploads still obey the existing 20 MB attachment limit.
+A native inbox admission does not also enter Shipyard's terminal input queue.
+The built-in OpenCode `tasks` and `sessions` creation routes also accept `files`.
+Initial uploads must belong to the selected project; a new worktree receives
+its own copy. The launcher submits them after applying the requested model,
+using `msg_first_` plus the native session ID. A launcher admission failure is
+shown in its terminal, without retrying through terminal input.
+The laptop `/v1/queue` accepts an optional `native` send payload and preserves
+its key/files/skills over restart; attempted native payloads cannot be edited or
+retargeted. Uncertain registered commands require inspection before a new send.
+
+OpenCode transcript responses have `source: "opencode"` and optional opaque
+`cursor`. Request older messages with `?cursor=…`, not numeric `before`; replace
+items by native ID and reset on a changed `gen`. The same child transcript/tool
+routes apply. `POST sessions/{name}/fork` accepts native message `at`, stable
+`idem_key`, optional `text`/`files` and title; it creates an independent owner.
+`POST sessions/{name}/interrupt` returns `{ sent, stopped, accepted }`, where
+`stopped` requires an observed inactive owner. Native events have no replay;
+reconnection rereads durable messages, inbox and pending requests.
 
 ## Terminals
 

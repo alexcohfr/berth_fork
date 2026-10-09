@@ -114,6 +114,8 @@ export function sendFailure(err: unknown, box: string): SendFailure | undefined 
 const newId = () => `app-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`;
 
 export interface EnqueueOptions {
+	 id?: string;
+  native?: { idem_key: string; when?: "now" | "idle"; files?: { uri: string; name?: string }[]; skills?: { id: string }[] };
   box: string;
   session: string;
   text: string;
@@ -127,7 +129,7 @@ export interface EnqueueOptions {
 // enqueue hands a prompt to the agent. The id is made here, so a retry of
 // this call never queues it twice.
 export async function enqueue(o: EnqueueOptions): Promise<QueueItem> {
-  const it = await call<QueueItem>("POST", "/v1/queue", { id: newId(), box: o.box, session: o.session, text: o.text, enter: o.enter ?? true, wait: o.wait ?? true });
+  const it = await call<QueueItem>("POST", "/v1/queue", { id: o.id ?? newId(), box: o.box, session: o.session, text: o.text, enter: o.enter ?? true, wait: o.wait ?? true, native: o.native });
   known.set(it.id, it);
   useQueue.setState((s) => ({ items: [...s.items.filter((x) => x.id !== it.id), it].sort((a, b) => a.seq - b.seq) }));
   if (o.toast !== false) {

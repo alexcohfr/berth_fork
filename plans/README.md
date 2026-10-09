@@ -8,11 +8,11 @@ Fichier : `plans/001-opencode-native-workspace.md`.
 
 Cible : utiliser le moteur OpenCode depuis Shipyard, avec ses prompts, modèles, skills et MCP, tout en conservant les machines, worktrees, terminaux, tâches et revues Shipyard.
 
-Statut global : **TODO — planifié, non implémenté**.
+Statut global : **IN PROGRESS — exécution reprise le 2026-10-09**.
 
 ## Ordre et suivi
 
-- Lot 0 — Canal vers le runtime propriétaire : **TODO**. Priorité P0, effort M, aucune dépendance.
+- Lot 0 — Canal vers le runtime propriétaire : **IN PROGRESS**. Pont plugin écarté après test réel OpenCode 2.0.18 ; plan révisé vers le serveur HTTP privé officiel. Priorité P0, effort M, aucune dépendance.
 - Lot 1 — Envoi, arrêt et reconnexion natifs : **TODO**. Priorité P1, effort L, dépend du lot 0.
 - Lot 2 — Permissions et formulaires dans le chat : **TODO**. Priorité P1, effort M, dépend du lot 1.
 - Lot 3 — Modèles/profils, commandes, skills et pièces jointes : **TODO**. Priorité P1, effort L, dépend des lots 1–2.

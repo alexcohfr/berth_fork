@@ -20,6 +20,55 @@ import (
 
 type sentPrompt struct{ box, session, text string }
 
+func TestOpenCodeQueueRetainsPayloadAndIdentityAcrossRestart(t *testing.T) {
+	boxes := newFakeQueueBoxes()
+	boxes.setSessions("devl", box.Session{Name: "acme", Agent: "opencode"})
+	r := newQueueRig(t, boxes, "")
+	var native box.SendRequest
+	if err := json.Unmarshal([]byte(`{"idem_key":"acme-native-id","when":"idle","files":[{"uri":"file:///acme/image%20%C3%A9.png"}],"skills":[{"id":"acme-skill"}]}`), &native); err != nil {
+		t.Fatal(err)
+	}
+	req := QueueRequest{ID: "acme-queue-id", Box: "devl", Session: "acme", Text: "Acme instruction", Native: &native}
+	it, err := r.q.add(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	wrong := req
+	wrong.Text = "different"
+	if _, err := r.q.add(wrong); err == nil {
+		t.Fatal("idempotency key accepted a different payload")
+	}
+	r.start(time.Second, 10*time.Millisecond)
+	boxes.onSend = func(n int, p sentPrompt) error {
+		if n == 1 {
+			return errors.New("ack lost")
+		}
+		return nil
+	}
+	boxes.setOnline("devl", true)
+	if out, err := r.q.sendNow(it.ID); err != nil || out.State != QueueFailed {
+		t.Fatalf("uncertain send: %+v %v", out, err)
+	}
+	r.start(time.Second, 10*time.Millisecond)
+	changed := "another destination"
+	if _, err := r.q.change(it.ID, QueueChange{Text: &changed}); err == nil {
+		t.Fatal("an attempted native payload was rewritten")
+	}
+	if _, err := r.q.sendNow(it.ID); err != nil {
+		t.Fatal(err)
+	}
+	boxes.mu.Lock()
+	defer boxes.mu.Unlock()
+	if len(boxes.requests) != 2 {
+		t.Fatalf("requests: %d", len(boxes.requests))
+	}
+	for _, got := range boxes.requests {
+		if got.IdemKey != "acme-native-id" || got.When != "idle" || got.Text != req.Text || len(got.Files) != 1 || got.Files[0].URI != native.Files[0].URI || len(got.Skills) != 1 || got.Skills[0].ID != "acme-skill" || got.Force {
+			t.Fatalf("native delivery changed: %+v", got)
+		}
+	}
+}
+
 // fakeQueueBoxes stands in for the boxes: which are online, what sessions
 // they run, and what happens to a send or a wait.
 type fakeQueueBoxes struct {
@@ -27,6 +76,7 @@ type fakeQueueBoxes struct {
 	up       map[string]bool
 	sessions map[string][]box.Session
 	sent     []sentPrompt
+	requests []box.SendRequest
 	// onSend, when set, decides a send's outcome; it runs before the send
 	// is recorded, and only a nil error records it.
 	onSend func(n int, p sentPrompt) error
@@ -83,10 +133,11 @@ func (f *fakeQueueBoxes) wait(ctx context.Context, name, session string, states 
 	return box.WaitResult{State: "finished"}, nil
 }
 
-func (f *fakeQueueBoxes) send(ctx context.Context, name, session, text string, enter bool) error {
-	p := sentPrompt{name, session, text}
+func (f *fakeQueueBoxes) send(ctx context.Context, name, session string, req box.SendRequest) error {
+	p := sentPrompt{name, session, req.Text}
 	f.mu.Lock()
 	f.sends++
+	f.requests = append(f.requests, req)
 	n, fn := f.sends, f.onSend
 	f.mu.Unlock()
 	if !f.online(name) {

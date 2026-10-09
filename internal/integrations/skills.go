@@ -80,7 +80,8 @@ func frontmatter(b []byte, key string) string {
 // Agent tools and where each discovers skills, relative to a home folder
 // (user skills) or a repository (project skills).
 var skillDirs = map[string]string{
-	"claude": filepath.Join(".claude", "skills"),
+	"opencode": filepath.Join(".opencode", "skills"),
+	"claude":   filepath.Join(".claude", "skills"),
 	// Codex reads $HOME/.agents/skills and <repo>/.agents/skills. It is
 	// $HOME's, not $CODEX_HOME's: every Codex account on the machine reads
 	// the same user skills, so they are installed once, not per account.
@@ -92,7 +93,26 @@ var skillDirs = map[string]string{
 var legacyCodexDir = filepath.Join(".codex", "skills")
 
 // SkillAgents are the tools skills install for.
-func SkillAgents() []string { return []string{"claude", "codex"} }
+func SkillAgents() []string { return []string{"claude", "codex", "opencode"} }
+
+// UserSkillDir differs from the repository scope for OpenCode.
+func UserSkillDir(home, agent string) (string, error) {
+	if agent == "opencode" {
+		config := os.Getenv("OPENCODE_CONFIG_DIR")
+		if config == "" {
+			config = filepath.Join(firstConfigHome(home), "opencode")
+		}
+		return filepath.Join(config, "skills"), nil
+	}
+	return SkillDir(home, agent)
+}
+
+func firstConfigHome(home string) string {
+	if x := os.Getenv("XDG_CONFIG_HOME"); x != "" {
+		return x
+	}
+	return filepath.Join(home, ".config")
+}
 
 // SkillState is an installed copy compared with what berth ships.
 type SkillState string
@@ -103,11 +123,11 @@ const (
 	SkillMissing   SkillState = "missing"
 )
 
-// SkillDir is where agent keeps skills under root (a home or a repository).
+// SkillDir resolves repository skills. Use UserSkillDir for the user scope.
 func SkillDir(root, agent string) (string, error) {
 	rel, ok := skillDirs[agent]
 	if !ok {
-		return "", fmt.Errorf("unknown agent %q; use claude or codex", agent)
+		return "", fmt.Errorf("unknown agent %q; use claude, codex or opencode", agent)
 	}
 	return filepath.Join(root, rel), nil
 }
@@ -155,6 +175,13 @@ func InstallProjectSkills(repo, agent string, names []string) ([]string, error) 
 }
 
 func installSkills(root, agent string, names []string, strict bool) ([]string, error) {
+	if agent == "opencode" && !strict {
+		dir, err := UserSkillDir(root, agent)
+		if err != nil {
+			return nil, err
+		}
+		return installSkillsIn(dir, "", names, false)
+	}
 	rel, ok := skillDirs[agent]
 	if !ok {
 		return nil, fmt.Errorf("unknown agent %q; use claude or codex", agent)
@@ -218,6 +245,13 @@ func UninstallProjectSkills(repo, agent string, names []string) ([]string, error
 }
 
 func uninstallSkills(root, agent string, names []string, strict bool) ([]string, error) {
+	if agent == "opencode" && !strict {
+		dir, err := UserSkillDir(root, agent)
+		if err != nil {
+			return nil, err
+		}
+		return uninstallSkillsIn(dir, "", names, false)
+	}
 	rel, ok := skillDirs[agent]
 	if !ok {
 		return nil, fmt.Errorf("unknown agent %q; use claude or codex", agent)

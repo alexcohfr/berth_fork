@@ -260,7 +260,7 @@ export const boxApi = {
     c.box(box, "DELETE", `locations/${encodeURIComponent(location)}/worktrees/${encodeURIComponent(worktree)}${force ? "?force=1" : ""}`),
   // home: in the box user's home folder, tied to no worktree, in place of a
   // location (boxes with the "session.home" capability).
-  startSession: (c: Client, box: string, req: ({ location: string } | { home: true }) & { name?: string; command?: string; agent?: string; prompt?: string; model?: string; effort?: string; title?: string }) =>
+  startSession: (c: Client, box: string, req: ({ location: string } | { home: true }) & { name?: string; command?: string; agent?: string; prompt?: string; files?: { uri: string; name?: string }[]; model?: string; effort?: string; title?: string }) =>
     c.box<Session>(box, "POST", "sessions", req),
   stopSession: (c: Client, box: string, name: string) => c.box(box, "DELETE", `sessions/${encodeURIComponent(name)}`),
   // Names a session's work; "" clears its title.
@@ -281,7 +281,7 @@ export const boxApi = {
   // send types text into a session. A person answering an agent passes
   // force: the box otherwise refuses to type into an agent at a question.
   // when "idle" holds it on the box until the agent is idle.
-  send: (c: Client, box: string, name: string, text: string, enter = true, o: { when?: "now" | "idle"; force?: boolean; idem_key?: string } = {}) =>
+  send: (c: Client, box: string, name: string, text: string, enter = true, o: { when?: "now" | "idle"; force?: boolean; idem_key?: string; files?: { uri: string; name?: string }[]; skills?: { id: string }[] } = {}) =>
     c.box<SendResult>(box, "POST", `sessions/${encodeURIComponent(name)}/send`, { text, enter, ...o }),
   // A session's latest turns, oldest first (boxes with the "turns" capability).
   turns: async (c: Client, box: string, name: string, limit = 20) =>

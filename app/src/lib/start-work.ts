@@ -27,6 +27,7 @@ import { findSession, focusSession, selectWorktree, setPaneContent, splitPane } 
 
 export interface StartDraft {
   text: string;
+  files?: { uri: string; name?: string }[];
   box: string;
   location: string;
   // new: a new worktree; main: the main checkout; here: the worktree at
@@ -56,6 +57,7 @@ export interface AttemptOptions {
 
 export interface SendDraft {
   targets: ComposerTarget[];
+  files?: ({ uri: string; name?: string }[] | undefined)[];
   // Each target's own text, its variables filled in.
   texts: string[];
   title: string;
@@ -121,7 +123,7 @@ export async function startWork(d: StartDraft): Promise<boolean> {
       toastManager.add({ type: "success", title: `Created ${wt.name}`, description: `${wt.branch ?? ""} on ${d.box}` });
       return true;
     }
-    const how = { agent: pick.agent, prompt: d.text || undefined, model: pick.model || undefined, effort: pick.effort || undefined };
+    const how = { agent: pick.agent, prompt: d.text || undefined, files: d.files, model: pick.model || undefined, effort: pick.effort || undefined };
     if (d.where === "new") {
       const name = d.worktree?.name || freeName(d.box, d.location, d.text ? slug(d.text) : randomName());
       const res = await client.box<TaskResult>(d.box, "POST", "tasks", {
@@ -243,6 +245,6 @@ export function sendWork(d: SendDraft): boolean {
     }
   }
   save("berth.broadcast.wait", d.wait);
-  startBroadcast({ title: d.title, wait: d.wait, queueOffline: d.queueOffline, items: d.targets.map((t, i) => ({ ...t, text: d.texts[i] })) });
+  startBroadcast({ title: d.title, wait: d.wait, queueOffline: d.queueOffline, items: d.targets.map((t, i) => ({ ...t, text: d.texts[i], files: d.files?.[i] })) });
   return true;
 }

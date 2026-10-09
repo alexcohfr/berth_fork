@@ -54,8 +54,8 @@ berthd integrations install opencode
 ```
 
 This replaces Shipyard's old V1 plugin with the V2 implementation. Restart
-existing OpenCode terminals after updating the integration; new sessions
-use `opencode mini --standalone`. The old Shipyard file in `plugin/` is
+existing OpenCode terminals after updating the integration. New tasks launch
+a private native server and Mini in the same tmux pane. The old Shipyard file in `plugin/` is
 backed up and removed after the V2 file is installed in `plugins/`.
 
 Before starting a task, open the agent picker, then **OpenCode** to choose
@@ -75,16 +75,83 @@ environment. The plugin filters out other locations and child-session
 completion events, so a helper finishing does not finish its parent's turn.
 It stays inactive in an ordinary shared OpenCode service.
 
-Native chat reads OpenCode's public V2 API through
-`opencode api --standalone`, using the exact session ID reported by the
-plugin. It shows the latest 100 messages and fetches tool details on demand.
-It does not query OpenCode's database schema, copy transcripts into
-Shipyard's event journal, or send reasoning and tool output in the normal
-chat feed. Messages remain readable after the terminal exits. Earlier
-messages, permissions and question forms are available in OpenCode's terminal.
+Shipyard and Mini connect to the same private runtime. Closing the app or
+restarting `berthd` leaves that pane running. A sleeping execution machine
+cannot continue work; use an always-on box for that. Live reads use authenticated
+HTTP; closed-session history uses `api --standalone`. Neither opens the private
+database. The event journal carries identities and states, not prompt content.
 
-The plugin and native chat require OpenCode 2. Custom presets that connect
-to another server need their own session integration.
+The contract is tested against **OpenCode 2.0.18 on macOS**. Linux execution and
+additional V2 versions need their own isolated contract run. Capabilities are
+discovered per runtime. Older standalone terminals keep history reads but need
+a new task for native control. Custom presets that connect to another server
+need their own integration; the terminal stays accessible.
+
+The launcher uses `serve --service --hostname 127.0.0.1 --port 0` with a per-task
+`XDG_STATE_HOME`. Mini discovers and authenticates through that registration.
+Its password remains private on the box, never in arguments, events or app URLs.
+User config and durable data retain their locations. No shared service is
+restarted or installed. If `opencode` is a shell wrapper overriding XDG, set
+`BERTH_OPENCODE_BIN` in the task environment to the compatible executable's
+absolute path; the native launcher rejects wrappers.
+
+#### Conversation controls
+
+- Send and Stop target the owning runtime. Admission is not completion; an
+  accepted interrupt is distinct from observed inactivity. Retries preserve the
+  native message ID. The laptop queue holds offline transport; OpenCode owns
+  prompts admitted while busy. There is no silent fallback to terminal input.
+- Permissions offer **Allow once**, **Always allow** and **Reject**, with the
+  proposed persistence patterns. Typed forms validate their fields; external
+  and unsupported fields remain available in the terminal.
+- **OpenCode options** lists effective agents, models, variants, commands and
+  skills. Changing an agent preserves the model; Plan is OpenCode's actual
+  agent. Registered slash commands use its command operation; uncertain commands
+  are not automatically repeated. Unknown commands fail explicitly.
+- Drop/paste/upload files normally. Shipyard sends native file attachments from
+  the box and rejects media without declared model support. A new OpenCode
+  task copies its initial uploaded attachments into its new worktree, selects
+  the requested model and admits that first message with a stable native ID.
+  The running-agents composer supports native files for agents sharing that
+  worktree. For loops, attempts, handoffs or custom commands, start the work
+  first and attach from its conversation.
+- Older messages use native cursors. Subagents appear in the crew. Search the
+  worktree's conversations to resume the same durable identity in a new task;
+  Shipyard refuses a second owner. Tokens and USD cost are native usage reports,
+  not context occupancy or a subscription bill. Compaction reports its native
+  status; display pagination never changes model memory.
+- Fork from a prompt to keep preceding history in a new task on the same
+  worktree. Rewind previews and stages a boundary, then can be cancelled or
+  confirmed. File restoration is disabled because preservation of unrelated
+  shell and user edits has not been verified.
+
+#### OpenCode on this machine
+
+Open this section in conversation options or **Settings → Agents**. It lists
+configuration sources, MCP status, server plugins and provider/MCP connections.
+OAuth can be resumed or cancelled; credentials stay in OpenCode's storage on
+that machine. Methods with external or command-driven forms use its terminal.
+
+Use the existing file editor for project `opencode.json(c)`: saves preserve
+JSONC comments, reject malformed documents and check the content version.
+Reload explicitly afterward; reload can cancel outstanding native requests.
+Global settings belong to that machine's user, model/profile choices to the
+conversation. OpenCode loads `AGENTS.md`; plugin-injected rules and the complete
+system prompt are not observable here. The tested V2 version does not resolve
+the `instructions` configuration field.
+
+**Transfer selected configuration** copies selected user/project rules, agents,
+commands and skill files into a destination project after path editing and a
+preview. Relative dependencies must be included or already present. Credential
+stores, provider config, databases and hidden secret files are excluded;
+inline credential-shaped content is rejected. Reconnect integrations on the
+destination. This is a one-time transfer, not folder sync. Each file is replaced
+atomically after a version check, but the batch is not a multi-file transaction:
+refresh its preview after an I/O failure before retrying.
+
+Server plugins run in OpenCode; their terminal extensions stay in the terminal.
+Mac-only tools and OS permissions do not become available on Linux by copying
+files. The panel identifies the execution machine.
 
 ### Every account
 

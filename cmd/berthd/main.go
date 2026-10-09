@@ -125,6 +125,11 @@ func run(args []string) error {
 		fmt.Println(version.Line("berthd"))
 		return nil
 	}
+	if args[0] == "opencode" {
+		ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM, syscall.SIGHUP)
+		defer stop()
+		return box.RunOpenCode(ctx, args[1:], os.Stdin, os.Stdout, os.Stderr)
+	}
 	home, err := statefile.Home()
 	if err != nil {
 		return err

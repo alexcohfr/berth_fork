@@ -27,10 +27,11 @@ import (
 
 // Turn is one prompt-to-end-of-turn of one agent session.
 type Turn struct {
-	ID      string `json:"id"` // "<session>#<n>"
-	Session string `json:"session"`
-	Agent   string `json:"agent,omitempty"`
-	N       int    `json:"n"`
+	NativeID string `json:"native_id,omitempty"`
+	ID       string `json:"id"` // "<session>#<n>"
+	Session  string `json:"session"`
+	Agent    string `json:"agent,omitempty"`
+	N        int    `json:"n"`
 	// Origin says who prompted: laptop:<peer>, flow:<id>, phone, terminal.
 	Origin string `json:"origin,omitempty"`
 	// SentSeq is the journal Seq of the send (0 if typed by a person),
@@ -539,6 +540,7 @@ func (t *Turns) sent(e events.Event) {
 		tr.IdemKey = str(e.Data, "idem_key")
 	}
 	tr.SentSeq, tr.Sent = e.Seq, e.Time
+	tr.NativeID = str(e.Data, "native_id")
 	if startsAtSend(s) {
 		// The send is the only start this agent gives: anything still
 		// running ended unseen.
@@ -1279,6 +1281,10 @@ func (t *Turns) openForScreen() []string {
 	var out []string
 	for name, s := range t.sess {
 		tr := s.current()
+		if s.Agent == "opencode" && (tr != nil || s.oldest("pending") != nil) {
+			out = append(out, name)
+			continue
+		}
 		if tr == nil {
 			if p := s.oldest("pending"); p != nil && s.Reconcile {
 				out = append(out, name)
@@ -1555,6 +1561,12 @@ func (b *Box) pollScreens(ctx context.Context) {
 		}
 		if sess.Exited {
 			b.Turns.Exited(name)
+			continue
+		}
+		if controlAgent(sess) == "opencode" {
+			if ep, owner, err := b.openCodeRuntime(ctx, sess); err == nil {
+				b.openCodeWatch(sess, ep, owner)
+			}
 			continue
 		}
 		if b.startingState(name) == startAsking {

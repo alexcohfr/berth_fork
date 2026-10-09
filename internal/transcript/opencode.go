@@ -14,7 +14,15 @@ type OpenCodeMessage struct {
 	Text    string `json:"text"`
 	Command string `json:"command"`
 	Output  string `json:"output"`
-	Time    struct {
+	Agent   string `json:"agent"`
+	Model   struct {
+		ID         string `json:"id"`
+		ProviderID string `json:"providerID"`
+		Variant    string `json:"variant"`
+	} `json:"model"`
+	Name   string `json:"name"`
+	Status string `json:"status"`
+	Time   struct {
 		Created   int64 `json:"created"`
 		Completed int64 `json:"completed"`
 	} `json:"time"`
@@ -49,9 +57,7 @@ type OpenCodePart struct {
 // A fresh window also replaces partial text, resolved tools and reverted items.
 func OpenCode(id, dir string, messages []OpenCodeMessage, more bool) Result {
 	r := Result{Source: "opencode", File: id, Gen: id, Reset: true, Items: []Item{}, Crew: []CrewMember{}, Truncated: more}
-	if more {
-		r.Items = append(r.Items, Item{Kind: "notice", ID: "opencode:older", Notice: "memory", Level: "info", Text: "Showing the latest 100 OpenCode messages. Earlier messages are available in OpenCode."})
-	}
+	r.More = more
 	for i := len(messages) - 1; i >= 0; i-- {
 		m := messages[i]
 		r.Last = max(r.Last, m.Time.Created, m.Time.Completed)
@@ -61,6 +67,9 @@ func OpenCode(id, dir string, messages []OpenCodeMessage, more bool) Result {
 		case "assistant":
 			for n, p := range m.Content {
 				key := fmt.Sprintf("%s:%d", m.ID, n)
+				if p.ID != "" {
+					key = m.ID + ":" + p.ID
+				}
 				switch p.Type {
 				case "text":
 					if p.Text != "" {
@@ -78,6 +87,12 @@ func OpenCode(id, dir string, messages []OpenCodeMessage, more bool) Result {
 			}
 		case "shell":
 			r.Items = append(r.Items, Item{Kind: "command", ID: m.ID, Command: "!", Args: m.Command, Text: clip(m.Output, maxText)})
+		case "agent-switched", "model-switched", "compaction", "skill":
+			text := map[string]string{"agent-switched": "Agent: " + m.Agent, "model-switched": "Model: " + m.Model.ProviderID + "/" + m.Model.ID, "compaction": "OpenCode compacted the conversation", "skill": "OpenCode loaded skill " + m.Name}[m.Type]
+			if m.Type == "compaction" {
+				text = "OpenCode compaction: " + m.Status
+			}
+			r.Items = append(r.Items, Item{Kind: "notice", ID: m.ID, Notice: "memory", Level: "info", Text: text})
 		}
 	}
 	r.Next = len(r.Items)

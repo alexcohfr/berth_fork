@@ -3,7 +3,7 @@ import type { Client } from "@/lib/api";
 // Skills teach the agent tools on a box (Claude Code, Codex) to use berth.
 // The box installs them for its user or inside one repository.
 
-export type SkillAgent = "claude" | "codex";
+export type SkillAgent = "claude" | "codex" | "opencode";
 export type SkillState = "installed" | "outdated" | "missing";
 export type SkillTarget = "user" | "project";
 

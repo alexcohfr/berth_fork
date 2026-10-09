@@ -23,10 +23,12 @@ export const hasHistory = (box: string) => isMock() || !!useStore.getState().box
 export const useHasHistory = (box: string) => useStore((s) => isMock() || !!s.boxes[box]?.info?.capabilities?.includes("history"));
 
 export interface TranscriptPage {
+  gen?: string;
   source: string;
   items: TranscriptItem[];
   next: number;
   more?: boolean;
+  cursor?: string | null;
 }
 
 // Helper is one of a session's helpers (a subagent) with its own record.
@@ -48,11 +50,13 @@ const s = encodeURIComponent;
 export const historyApi = {
   older: (c: Client, box: string, session: string, before: number, limit = PAGE) =>
     c.box<TranscriptPage>(box, "GET", `sessions/${s(session)}/transcript?before=${before}&limit=${limit}`),
+  cursor: (c: Client, box: string, session: string, cursor: string) => c.box<TranscriptPage>(box, "GET", `sessions/${s(session)}/transcript?cursor=${s(cursor)}`),
   helpers: async (c: Client, box: string, session: string) => (await c.box<{ helpers: Helper[] | null }>(box, "GET", `sessions/${s(session)}/subagents`)).helpers ?? [],
   helperTranscript: (c: Client, box: string, session: string, id: string, since: number) =>
     c.box<TranscriptPage>(box, "GET", `sessions/${s(session)}/subagents/${s(id)}/transcript?since=${since}`),
   helperTool: (c: Client, box: string, session: string, id: string, tool: string) => c.box<ToolDetail>(box, "GET", `sessions/${s(session)}/subagents/${s(id)}/tool/${s(tool)}`),
-  fork: (c: Client, box: string, session: string, req: { at?: string; text?: string; title?: string; open?: "tab" | "split" }) => c.box<Session>(box, "POST", `sessions/${s(session)}/fork`, req),
+  helperCursor: (c: Client, box: string, session: string, id: string, cursor: string) => c.box<TranscriptPage>(box, "GET", `sessions/${s(session)}/subagents/${s(id)}/transcript?cursor=${s(cursor)}`),
+  fork: (c: Client, box: string, session: string, req: { at?: string; text?: string; title?: string; open?: "tab" | "split"; idem_key?: string; files?: { uri: string }[] }) => c.box<Session>(box, "POST", `sessions/${s(session)}/fork`, req),
   rewind: (c: Client, box: string, session: string, req: { text: string; nth?: number; restore?: "conversation" | "both" | "code" }) =>
     c.box<{ restored: "conversation" | "both" | "code"; text: string }>(box, "POST", `sessions/${s(session)}/rewind`, req),
 };
@@ -65,6 +69,9 @@ const PAGE = 200;
 const MAX_OLDER = 6000;
 
 export interface Older {
+  generation?: string;
+  cursor?: string | null;
+  native?: boolean;
   items: TranscriptItem[];
   // Earlier ones remain on the box.
   more: boolean;
@@ -92,6 +99,28 @@ const NO_OLDER: Older = { items: [], more: true, loading: false };
 export const useOlder = (key: string) => useHistory((st) => st.older[key]) ?? NO_OLDER;
 
 const patchOlder = (key: string, p: Partial<Older>) => useHistory.setState((st) => ({ older: { ...st.older, [key]: { ...(st.older[key] ?? NO_OLDER), ...p } } }));
+
+export function nativeHistory(key: string, cursor: string | null, fresh: boolean, generation: string) {
+  if (fresh) dropOlder(key);
+  const cur = useHistory.getState().older[key];
+  if (!cur?.native || !cur.items.length) patchOlder(key, { native: true, cursor, more: !!cursor, generation });
+}
+
+export async function loadNativeOlder(box: string, session: string) {
+  const key = keyOf(box, session);
+  const client = useStore.getState().client;
+  const cur = useHistory.getState().older[key];
+  if (!client || !cur?.cursor || cur.loading || !cur.more) return;
+  patchOlder(key, { loading: true, error: undefined });
+  try {
+    const page = await historyApi.cursor(client, box, session, cur.cursor);
+    const now = useHistory.getState().older[key];
+    if (!now?.loading || now.cursor !== cur.cursor || now.generation !== cur.generation) return;
+    if (page.gen && page.gen !== cur.generation) { dropOlder(key); return; }
+    const have = new Set([...now.items, ...(useConversations.getState().items[key] ?? [])].map((it) => it.id));
+    patchOlder(key, { items: [...page.items.filter((it) => !have.has(it.id)), ...now.items].slice(-MAX_OLDER), cursor: page.cursor, more: !!page.cursor && now.items.length < MAX_OLDER, loading: false });
+  } catch (err) { if (useHistory.getState().older[key]?.generation === cur.generation) patchOlder(key, { loading: false, error: err instanceof Error ? err.message : String(err) }); }
+}
 
 // loadOlder reads the page before the oldest item the chat holds.
 export async function loadOlder(box: string, session: string, before: number): Promise<void> {
