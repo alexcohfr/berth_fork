@@ -223,6 +223,56 @@ func TestOpenCodeFirstPromptHonorsSendGateBeforeLaunching(t *testing.T) {
 	}
 }
 
+func TestOpenCodeFollowupGatesApplyOnceForAPIAndAutomation(t *testing.T) {
+	s := testSessions(t)
+	b := &Box{Sessions: s, Locations: NewLocations(filepath.Join(t.TempDir(), "locations.json"))}
+	repo := gitRepo(t)
+	if _, err := b.Locations.Add(context.Background(), "acme", repo); err != nil {
+		t.Fatal(err)
+	}
+	sess, err := s.create(context.Background(), "acme-gated", "acme", repo, "cat", "opencode", nil, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, scope := range []string{"box", "project"} {
+		for _, transport := range []string{"api", "automation"} {
+			for _, deny := range []bool{true, false} {
+				count := filepath.Join(t.TempDir(), "calls")
+				run := "echo called >> " + shellQuote(count)
+				want := "no native runtime"
+				if deny {
+					run += "; echo acme send refused; exit 1"
+					want = "acme send refused"
+				}
+				hk := hooks.Hook{On: "before:session.send", Run: run}
+				b.Hooks = nil
+				if scope == "box" {
+					path := filepath.Join(t.TempDir(), "hooks.json")
+					data, _ := json.Marshal(map[string]any{"hooks": []hooks.Hook{hk}})
+					if err := os.WriteFile(path, data, 0o600); err != nil {
+						t.Fatal(err)
+					}
+					b.Hooks = &hooks.Runner{Path: path}
+				} else {
+					writeRepoConfig(t, repo, RepoConfig{Hooks: []hooks.Hook{hk}})
+					trustRepo(t, b.Locations, "acme")
+				}
+				if transport == "api" {
+					r := httptest.NewRequest("POST", "/", strings.NewReader(`{"text":"Acme followup"}`))
+					r.SetPathValue("name", sess.Name)
+					err = b.sendToSession(httptest.NewRecorder(), r)
+				} else {
+					_, err = b.sendPrompt(context.Background(), sess.Name, SendRequest{Text: "Acme followup", When: "idle"}, "berth", "berth:report")
+				}
+				calls, _ := os.ReadFile(count)
+				if err == nil || !strings.Contains(err.Error(), want) || string(calls) != "called\n" {
+					t.Fatalf("%s/%s/deny=%v: error %v, gate calls %q", scope, transport, deny, err, calls)
+				}
+			}
+		}
+	}
+}
+
 func TestOpenCodeAttachmentRejectsForeignMissingAndUnsupportedMedia(t *testing.T) {
 	b, sess, ep := syntheticOpenCode(t, func(w http.ResponseWriter, r *http.Request) {
 		switch r.URL.Path {

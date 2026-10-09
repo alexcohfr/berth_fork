@@ -737,6 +737,9 @@ func (b *Box) beforeAs(ctx context.Context, origin, typ string, data map[string]
 }
 
 func (b *Box) beforeRepoCtx(ctx context.Context, e events.Event) error {
+	if b.Locations == nil {
+		return nil
+	}
 	hs, env := b.repoHooks(ctx, e.Data)
 	for _, hk := range hs {
 		if !hooks.MatchesBefore(hk, e) {

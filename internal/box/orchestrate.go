@@ -150,9 +150,6 @@ func (b *Box) sendToSession(w http.ResponseWriter, r *http.Request) error {
 		return err
 	}
 	name := r.PathValue("name")
-	if err := b.before(r, "session.send", map[string]any{"name": name}); err != nil {
-		return err
-	}
 	res, err := b.sendPrompt(r.Context(), name, req, origin(r), gateOrigin(r))
 	if err != nil {
 		return err
@@ -180,6 +177,11 @@ func (b *Box) sendPrompt(ctx context.Context, name string, req SendRequest, orig
 	}
 	if sess.Exited {
 		return SendResult{}, ErrSessionExited
+	}
+	// Gate the shared admission path so API, flows and reports obey the same
+	// box and project rules, once, before either native or terminal delivery.
+	if err := b.beforeAs(ctx, from, "session.send", map[string]any{"name": name, "path": sess.Dir}); err != nil {
+		return SendResult{}, err
 	}
 	if controlAgent(sess) == "opencode" {
 		return b.openCodeSend(ctx, sess, req, origin, from)

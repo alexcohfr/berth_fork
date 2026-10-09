@@ -84,9 +84,6 @@ func (b *Box) openCodeFork(w http.ResponseWriter, r *http.Request, sess Session,
 			case <-tick.C:
 			}
 		}
-		if err := b.before(r, "session.send", map[string]any{"name": ns.Name, "path": ns.Dir}); err != nil {
-			return err
-		}
 		if _, err := b.sendPrompt(r.Context(), ns.Name, SendRequest{Text: req.Text, Files: req.Files, When: "idle", IdemKey: "fork-first-" + req.IdemKey}, origin(r), gateOrigin(r)); err != nil {
 			return err
 		}
