@@ -10,6 +10,7 @@ import (
 	"slices"
 	"strings"
 	"sync"
+	"time"
 )
 
 var openCodeCapabilitiesCache sync.Map
@@ -185,23 +186,39 @@ func openCodeFiles(ctx context.Context, ep openCodeEndpoint, owner openCodeOwner
 					return err
 				}
 			}
-			catalog, err := openCodeCatalogAt(ctx, ep, owner.Directory)
-			if err != nil {
-				return err
-			}
 			media := "image"
 			if kind == "application/pdf" {
 				media = "pdf"
 			}
-			supported := false
-			for _, m := range catalog.Models {
-				if m.ID == info.Data.Model.ID && m.ProviderID == info.Data.Model.ProviderID && m.Enabled {
-					supported = slices.Contains(m.Capabilities.Input, media)
+			// Model snapshots may precede initial plugin settlement. Wait for
+			// the selected model, never substitute one from the partial catalog.
+			ready, cancel := context.WithTimeout(ctx, 5*time.Second)
+			defer cancel()
+			for {
+				catalog, err := openCodeCatalogAt(ready, ep, owner.Directory)
+				if err != nil {
+					return err
+				}
+				found := false
+				for _, m := range catalog.Models {
+					if m.ID != info.Data.Model.ID || m.ProviderID != info.Data.Model.ProviderID {
+						continue
+					}
+					found = true
+					if !m.Enabled || !slices.Contains(m.Capabilities.Input, media) {
+						return badRequest("the current OpenCode model does not declare %s input support; select a compatible model", media)
+					}
+				}
+				if found {
+					break
+				}
+				select {
+				case <-ready.Done():
+					return httpError{http.StatusServiceUnavailable, "The selected OpenCode model is not available yet; refresh its catalog before sending"}
+				case <-time.After(50 * time.Millisecond):
 				}
 			}
-			if !supported {
-				return badRequest("the current OpenCode model does not declare %s input support; select a compatible model", media)
-			}
+			cancel()
 		}
 		files[i].URI = (&url.URL{Scheme: "file", Path: path}).String()
 	}

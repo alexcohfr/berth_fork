@@ -81,16 +81,18 @@ cannot continue work; use an always-on box for that. Live reads use authenticate
 HTTP; closed-session history uses `api --standalone`. Neither opens the private
 database. The event journal carries identities and states, not prompt content.
 
-The contract is tested against **OpenCode 2.0.18 on macOS**. Linux execution and
-additional V2 versions need their own isolated contract run. Capabilities are
-discovered per runtime. Older standalone terminals keep history reads but need
+The isolated contract passes with **OpenCode 2.0.18 on macOS and Linux arm64**,
+and **2.0.26 on Linux arm64**. The macOS 2.0.26 binary did not start its isolated
+server during validation, so that combination is not yet verified. Capabilities
+are discovered per runtime. Older standalone terminals keep history reads but need
 a new task for native control. Custom presets that connect to another server
 need their own integration; the terminal stays accessible.
 
 The launcher uses `serve --service --hostname 127.0.0.1 --port 0` with a per-task
 `XDG_STATE_HOME`. Mini discovers and authenticates through that registration.
 Its password remains private on the box, never in arguments, events or app URLs.
-User config and durable data retain their locations. No shared service is
+The launcher waits for an authenticated health response from its own process
+before creating or resuming a conversation. User config and durable data retain their locations. No shared service is
 restarted or installed. If `opencode` is a shell wrapper overriding XDG, set
 `BERTH_OPENCODE_BIN` in the task environment to the compatible executable's
 absolute path; the native launcher rejects wrappers.
@@ -111,7 +113,8 @@ absolute path; the native launcher rejects wrappers.
 - Drop/paste/upload files normally. Shipyard sends native file attachments from
   the box and rejects media without declared model support. A new OpenCode
   task copies its initial uploaded attachments into its new worktree, selects
-  the requested model and admits that first message with a stable native ID.
+  the requested model, waits for its startup catalog entry and admits that
+  first message with a stable native ID.
   The running-agents composer supports native files for agents sharing that
   worktree. For loops, attempts, handoffs or custom commands, start the work
   first and attach from its conversation.

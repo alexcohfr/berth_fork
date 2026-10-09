@@ -219,13 +219,21 @@ func RunOpenCode(ctx context.Context, args []string, in io.Reader, out, stderr i
 	for {
 		ep, err = openCodeEndpointAt(root)
 		if err == nil && ep.PID == server.Process.Pid {
-			break
+			var health struct {
+				PID int `json:"pid"`
+			}
+			probe, cancel := context.WithTimeout(ctx, time.Second)
+			err := ep.call(probe, "GET", "/api/info", nil, &health)
+			cancel()
+			if err == nil && health.PID == server.Process.Pid {
+				break
+			}
 		}
 		select {
 		case <-ctx.Done():
 			return ctx.Err()
 		case <-deadline.C:
-			return errors.New("OpenCode did not register in its private XDG directory; check BERTH_OPENCODE_BIN")
+			return errors.New("OpenCode did not become ready in its private XDG directory; check BERTH_OPENCODE_BIN")
 		case <-serverDone:
 			// Put the result back so cleanup never signals a reaped PID.
 			serverDone <- errors.New("exited")

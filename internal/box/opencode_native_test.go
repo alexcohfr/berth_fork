@@ -322,6 +322,38 @@ func TestOpenCodeAttachmentRejectsForeignMissingAndUnsupportedMedia(t *testing.T
 	}
 }
 
+func TestOpenCodeAttachmentWaitsForSelectedModelCatalog(t *testing.T) {
+	var reads atomic.Int32
+	b, sess, ep := syntheticOpenCode(t, func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/openapi.json":
+			writeJSON(w, map[string]any{"paths": map[string]any{"/model": map[string]any{"get": map[string]string{"operationId": "model.list"}, "post": map[string]string{"operationId": "session.switchModel"}}}})
+		case "/api/session/ses_acme":
+			writeJSON(w, map[string]any{"data": map[string]any{"model": map[string]string{"providerID": "acme", "id": "vision"}}})
+		case "/api/model":
+			models := []any{}
+			if reads.Add(1) > 1 {
+				models = append(models, map[string]any{"id": "vision", "providerID": "acme", "enabled": true, "capabilities": map[string]any{"input": []string{"text", "image"}}})
+			}
+			writeJSON(w, map[string]any{"data": models})
+		default:
+			t.Errorf("unexpected endpoint %s", r.URL.Path)
+			w.WriteHeader(404)
+		}
+	})
+	_, owner, err := b.openCodeRuntime(context.Background(), sess)
+	if err != nil {
+		t.Fatal(err)
+	}
+	path := filepath.Join(sess.Dir, "acme.png")
+	if err := os.WriteFile(path, []byte{137, 80, 78, 71, 13, 10, 26, 10}, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := openCodeFiles(context.Background(), ep, owner, []openCodeFile{{URI: (&url.URL{Scheme: "file", Path: path}).String()}}); err != nil {
+		t.Fatalf("partial startup catalog rejected a supported attachment: %v", err)
+	}
+}
+
 func TestOpenCodeReconcilesNativeIDsWithoutCrossingAChildPermission(t *testing.T) {
 	var phase atomic.Int32
 	b, sess, ep := syntheticOpenCode(t, func(w http.ResponseWriter, r *http.Request) {
