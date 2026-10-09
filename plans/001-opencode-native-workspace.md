@@ -1,12 +1,13 @@
 # Plan 001 — Utiliser Shipyard comme interface complète d’OpenCode
 
-> Plan d’implémentation, pas implémentation réalisée. Lire entièrement avant de commencer.
+> Plan d’implémentation établi avant les travaux ; les constats de la section 2 décrivent cette baseline.
+> Le suivi actuel est dans `plans/README.md` et les preuves finales dans `plans/001-opencode-native-acceptance.md`.
 > Exécuter un lot à la fois ; valider ses tests et les contrôles communs avant de passer au suivant.
 > En cas de condition STOP, consigner le blocage dans `plans/README.md` plutôt que contourner le contrat.
 
 ## Statut et intention
 
-- **Statut** : TODO.
+- **Statut** : IN PROGRESS — code des huit lots livré dans `feat/opencode-native-workspace`, revue locale effectuée ; recette complète et matrice multi-environnements restantes. Voir le suivi par lot.
 - **Priorité** : P1 ; lots 0 à 3 indispensables à l’usage quotidien.
 - **Effort global** : L, plusieurs PR ; estimations relatives par lot ci-dessous.
 - **Risque** : élevé pour le transport, la livraison des messages et le retour arrière ; moyen ailleurs.
@@ -360,17 +361,17 @@ Directions écartées : réécrire les prompts/outils OpenCode dans Shipyard ; a
 
 ## 8. Critères de fin et scénario de recette
 
-- [ ] Contrat réel isolé testé, version et transport retenus documentés ; aucun SKIP pour les fonctionnalités déclarées.
-- [ ] Deux tâches OpenCode sur le même worktree restent indépendantes, y compris leurs demandes d’autorisation et environnements.
-- [ ] Retry après coupure = un seul ID admis ; envoi/arrêt/questions natifs ne dépendent pas du texte de l’écran.
-- [ ] Tous les prompts passent par les gates et le suivi de tours Shipyard sans remplacement du prompt système OpenCode.
-- [ ] Choix modèle/profil, catalogue de commandes/skills et image jointe fonctionnent dans le chat ; la config réellement chargée est identifiable.
-- [ ] Historique de 250+ messages, sous-agents et reprise d’une session existante passent les tests sans doublons ni trous.
-- [ ] MCP/fournisseurs signalent les connexions manquantes et les différences local/distant ; secrets sentinelles absents des vues/journaux.
-- [ ] Fork/revert validés sur repo jetable ; les limitations de snapshots sont explicites.
+- [x] Contrat réel isolé testé, version et transport retenus documentés ; aucun SKIP pour les fonctionnalités déclarées.
+- [x] Deux tâches OpenCode sur le même worktree restent indépendantes, y compris leurs demandes d’autorisation et environnements.
+- [x] Retry après coupure = un seul ID admis ; envoi/arrêt/questions natifs ne dépendent pas du texte de l’écran.
+- [x] Tous les prompts passent par les gates et le suivi de tours Shipyard sans remplacement du prompt système OpenCode. Contrôle commun aux envois API/flows/rapports après correction de revue.
+- [x] Choix modèle/profil, catalogue de commandes/skills et image jointe fonctionnent dans le chat ; la config réellement chargée est identifiable.
+- [x] Historique de 250+ messages, sous-agents et reprise d’une session existante passent les tests sans doublons ni trous.
+- [x] MCP/fournisseurs signalent les connexions manquantes et les différences local/distant ; secrets sentinelles absents des vues/journaux. Validation sur comptes synthétiques.
+- [x] Fork/revert validés sur repo jetable ; les limitations de snapshots sont explicites.
 - [ ] Fermeture de l’app et redémarrage de berthd n’arrêtent pas la session distante encore active.
-- [ ] Vérifications Go/Rust/app/docs et specs touchées passent, sans régression Claude/Codex.
-- [ ] Diff borné au lot, changelog et docs à jour, statut du lot renseigné dans `plans/README.md`.
+- [x] Vérifications Go/Rust/app/docs et specs touchées passent, sans régression détectée par ces contrôles.
+- [x] Diff borné aux lots, changelog et docs à jour, statut des lots renseigné dans `plans/README.md`.
 
 **Scénario final à automatiser autant que possible :** sur une box de test, créer un worktree via Shipyard ; lancer OpenCode avec un profil et une variante ; appeler une commande et un skill de test ; joindre une image ; répondre à un formulaire puis à une permission ; observer un sous-agent ; interrompre/reprendre ; couper/reconnecter le client pendant un envoi ; rouvrir l’historique ; afficher la preview et le diff ; créer un fork ; effectuer puis annuler un retour arrière. Le faux fournisseur permet une séquence déterministe sans dépense ni intégrations personnelles.
 
@@ -382,11 +383,11 @@ En revue, porter l’attention sur l’identité runtime/session, la séparation
 
 ## 10. Preuves d’exécution — 2026-10-09
 
-### Base et limite atteinte
+### Première exécution — base et limite atteinte (historique)
 
 - Worktree d’exécution : `/Users/alexandrecohen/projets/berth_fork-opencode-native`, branche `feat/opencode-native-workspace`.
 - Base transférée : `a175393fbc010b2cc0af1253ead4a4a2d3d244fe`. Uniquement les diffs suivis `app/`, `internal/`, `docs/` et les fichiers ordinaires `plans/`; aucun diff `site/` ni wallpaper. Le dépôt initial n’a été ni réinitialisé ni modifié.
-- **STOP au lot 0, condition « méthode absente du contrat public effectivement testé ».** Aucun lot 1–7 n’est implémenté. Le transport n’est pas retenu et la parité n’est pas déclarée.
+- **STOP initial au lot 0, condition « méthode absente du contrat public effectivement testé ».** À ce stade initial, aucun lot 1–7 n'était implémenté. Ce blocage a ensuite été levé par la révision explicite vers HTTP ; voir le compte rendu de recette pour l'état actuel.
 - Le test réel existant (Mini, faux fournisseur local, hooks, lecture après sortie) passait avant l’ajout du contrôle de surface. Le test étendu échoue explicitement sur `typeof ctx.session.compact = undefined` dans **OpenCode 2.0.18**, alors que cette méthode figure dans le guide public des plugins. Ce n’est pas un test ignoré.
 - L’inventaire du plugin montre aussi l’absence de `form`, `session.form`, `session.message`, `session.inbox`, `session.fork`, `session.revert` et `config`. Le pont `ctx` proposé ne peut donc pas être figé comme transport de l’ensemble du plan. Les noms HTTP ne sont pas des méthodes plugin implicites.
 
@@ -407,7 +408,7 @@ Sources relues : [CLI](https://opencode.ai/v2/docs/cli), [API](https://opencode.
 5. **Client public et authentification.** Le paquet publié `@opencode/client@2.0.18`, lié par la documentation client, expose `Service.headers(endpoint)` et un endpoint Basic avec `username/password`. Son implémentation publique utilise le nom `opencode`. La documentation expose `Service.ensure({file, version, command, onStart})`. Elle permet de spécifier un service dédié; elle ne donne pas au plugin actuel toutes les méthodes de l’API HTTP.
 6. **RPC plugin.** Le RPC public ajoute des méthodes implémentées par le plugin; il ne crée pas les méthodes absentes de son contexte. Aucun import privé Core, fork d’OpenCode, accès direct à sa base ou proxy arbitraire n’a été ajouté.
 
-**Décision à reprendre avant l’UI :** réviser explicitement le lancement pour qu’un serveur HTTP privé précède Mini et en soit le propriétaire partagé avec Shipyard, ou choisir une version dont le contexte plugin couvre les opérations requises et le prouver. La première piste doit définir le passage d’authentification à Mini, la survie dans tmux, le registre par instance, le nettoyage et le traitement des lanceurs qui réécrivent XDG. Les preuves ci-dessus ne déclarent pas cette intégration réalisée. Une simple montée de version n’a pas été démontrée suffisante. Aucun binaire utilisateur n’a été mis à jour.
+**Décision historique, désormais appliquée :** lancement d'un serveur HTTP privé avant Mini, avec découverte/authentification partagée, supervision dans tmux et registre par instance. Les preuves ci-dessus décrivent seulement la première sonde ; la validation du transport intégré est consignée dans `plans/001-opencode-native-acceptance.md`. Aucun binaire utilisateur n'a été mis à jour.
 
 ### Vérifications effectuées
 
@@ -431,9 +432,9 @@ Le reviewer a relu les preuves et les guides publics CLI, Web, Troubleshooting e
 
 Contrat de lancement à prouver : authentification par mécanisme public, refus non authentifié, session liée identique vue par Mini et API, arrêt/permission affectant le propriétaire attendu, survie aux déconnexions du client/daemon, arrêt limité aux processus possédés. Les mots de passe ne vont ni dans les arguments, ni les URL, ni le journal ; registre privé et env seulement lorsque le binaire les prend en charge. Ne pas modifier le service personnel. Le lanceur utilisateur connu réécrit XDG : détecter explicitement l'échec d'isolation ; ne pas déduire un exécutable en décodant arbitrairement un script. Un chemin explicite de binaire compatible ou un mécanisme de connexion explicite documenté peut résoudre ce cas. Les essais restent isolés avec l'exécutable réel déjà identifié.
 
-### Reprise — contrôle de création avec image
+### Reprise — contrôle de création avec image (historique, résolu)
 
-Les contrôles Go/app/docs et le contrat HTTP étendu ont passé avant l'ajout du scénario de première image sur un nouveau worktree. Ce dernier a ensuite échoué plusieurs fois : configuration synthétique initialement non commitée dans le repo jetable, assertion de chemin non canonique sur macOS, puis délai sans requête image observée. Le lot n'est pas validé sur ces résultats. Diagnostic ciblé du lanceur en cours, sans élargissement de périmètre ; les statuts du README restent au reviewer.
+Les contrôles Go/app/docs et le contrat HTTP étendu ont passé avant l'ajout du scénario de première image sur un nouveau worktree. Ce dernier a ensuite échoué plusieurs fois : configuration synthétique initialement non commitée dans le repo jetable, assertion de chemin non canonique sur macOS, puis délai sans requête image observée. Ces premiers résultats ne validaient pas le lot. La recette macOS finale a ensuite passé ; la revue Linux a isolé et corrigé la lecture d'un catalogue modèle encore partiel au démarrage. Les résultats actuels sont dans le compte rendu de recette.
 
 ## 11. Recette de l'implémentation révisée
 

@@ -1,6 +1,6 @@
 # Recette OpenCode natif — 2026-10-09
 
-**STATUS: COMPLETE** — implémentation des lots 0–7 livrée et contrôles exécutés réussis, avec les limites fonctionnelles et de recette détaillées ci-dessous.
+**STATUS: REVIEWED — recette partielle**. Code des lots 0–7 livré ; contrat réel validé sur macOS/OpenCode 2.0.18 et Linux arm64/OpenCode 2.0.18 et 2.0.26. La recette complète et le démarrage macOS/2.0.26 restent ouverts dans `plans/README.md` ; ce compte rendu ne déclare pas une parité complète.
 
 ## Périmètre et identité Git
 
@@ -8,10 +8,10 @@
 - Branche : `feat/opencode-native-workspace`.
 - Baseline conservée : `a175393fbc010b2cc0af1253ead4a4a2d3d244fe`.
 - Investigation plugin conservée : `b3a3aab8f39d7893f5a906284d6a102952e97062`.
-- Le SHA final est celui du commit contenant ce compte rendu, donné dans la réponse de livraison (`git rev-parse HEAD`).
-- Les modifications du reviewer dans le plan et son README sont conservées. Aucun changement de leurs statuts par l'implémenteur.
+- Implémentation initiale : `dae3bcf`. Corrections de revue : gates `e0cbae6`, disponibilité et média `ac1df33`. Le SHA courant se lit avec `git rev-parse HEAD` ; le suivi de revue est commité séparément.
+- Les statuts de `plans/README.md` sont actualisés par le reviewer, séparément du compte rendu initial de l'implémenteur.
 - Le dépôt initial, `site/`, les wallpapers, les services personnels et les données durables personnelles restent hors de cette livraison.
-- Commit local uniquement ; aucun push, aucune PR ou publication.
+- Workflow de livraison : branche dédiée et PR brouillon contre `main` sur `cosscom/shipyard`, selon les consignes du dépôt. Aucun déploiement ni fusion ; les limites de recette doivent rester visibles dans la PR.
 
 ## Lots et preuves
 
@@ -115,6 +115,15 @@ Première commande : **50/50 réussis**. Deuxième commande : **24/24 réussis**
 
 Après les derniers correctifs de retry et d'encodage d'URI : nouveau build app, compilation TypeScript e2e et `E2E_PORT=1434 E2E_WORKERS=2 BERTH_E2E_LIVE=0 npx playwright test e2e/opencode.spec.ts e2e/composer.spec.ts` : **10/10 réussis**, dont le nom de fichier contenant un `%20` littéral. Le contrat réel et la suite Go générale ont aussi été rejoués après les modifications backend : exit 0.
 
+## Revue indépendante — 2026-10-09
+
+- Diff relu depuis `a175393`, notamment propriétaire/runtime, admission et retries, queue persistante, formulaires/permissions, historique, transfert et rewind. `git diff --check` passe.
+- Réexécution indépendante réussie : `go vet ./...`, `go test -race ./...`, contrat réel 2.0.18 sans SKIP, `cargo check`, installation pnpm figée, contrôles plugins/titres/CSP/thèmes, 271 tests app, build app, TypeScript e2e et build docs.
+- Recette navigateur indépendante : `e2e/opencode.spec.ts` + `e2e/composer.spec.ts`, cinq répétitions, **50/50** réussies sur le port libre 1434.
+- Correction de revue : les gates box/projet des envois suivants sont désormais dans `sendPrompt`, commun aux routes API, flows et rapports. Le gate du fork est dédupliqué. Le test `TestOpenCodeFollowupGatesApplyOnceForAPIAndAutomation` vérifie refus, autorisation et une seule exécution du gate aux deux portées.
+- Après ce correctif : test ciblé, Go vet, suite Go race complète et contrat réel 2.0.18 passent à nouveau ; build docs également réussi. Aucune modification frontend après sa recette indépendante.
+- La reconstruction du client Box et la reconnexion navigateur ne remplacent pas une recette monolithique avec arrêt/redémarrage du véritable daemon et fermeture/réouverture de l'application. Les lots 6–7 restent ouverts pour cette preuve.
+
 ## Écarts, incidents et limites de validation
 
 - Le transport HTTP public remplace le pont plugin conformément à la révision approuvée. Les méthodes absentes du plugin restent documentées comme preuve historique.
@@ -123,11 +132,23 @@ Après les derniers correctifs de retry et d'encodage d'URI : nouveau build app,
 - Les premières recettes d'image ont révélé une fixture non commitée, puis une comparaison de chemins non canoniques et un délai transitoire non reproduit dans les cinq répétitions suivantes. Le diagnostic du terminal est conservé en cas de récidive.
 - Les premières assertions navigateur confondaient plusieurs messages assistant regroupés et leurs libellés visibles. La fixture de pagination et les sélecteurs de messages ont été corrigés ; cinq répétitions passent.
 - La revue finale a corrigé le changement involontaire de mode de livraison lors d'un passage en queue après un envoi média incertain, la portée projet des nouveaux appels de gates et l'encodage des `%` littéraux dans les URI. Les tests de queue, de refus de première instruction et de pièces jointes navigateur couvrent ces cas.
-- Linux et une autre version V2 restent non exécutés. Ce sont des limites de matrice, pas une validation implicite.
+- La revue indépendante a étendu la matrice à Linux arm64 et OpenCode 2.0.26 ; résultats et incidents ci-dessous. Aucun résultat de cette matrice n'est déduit des seuls tests macOS 2.0.18.
 - Pas de test réel de comptes OAuth/MCP personnels, ni de migration de données, ni de restauration de fichiers. Les composants serveur OpenCode continuent à exécuter leurs propres extensions.
 - Artefacts générés de compilation TypeScript/Vite identifiés puis retirés du diff ; dépendances et journaux de validation restent dans `node_modules`, non commités.
 
 Journaux locaux : `app/node_modules/.shipyard-tools/` (`full-go.log`, `targeted-final.log`, `live-contract.log`, `live-repeat.log`, `cargo-check.log`, `app-checks-final.log`, `app-tests-final.log`, `app-build.log`, `docs-build.log`, `browser-repeat.log`, `browser-tests.log`, `browser-final.log`).
+
+### Extension de matrice par le reviewer
+
+- Image officielle `golang:1.27.2-bookworm`, digest `sha256:5cf287a799e6b94384bad13d16b14904c531f51ba65792237e122ce42b392f61`. Linux 6.12.54-linuxkit arm64, tmux 3.3a. Conteneurs jetables, sans montage des configurations personnelles ; seuls un export des sources et les binaires de test sont montés en lecture seule.
+- Binaires officiels npm `@opencode/cli-linux-arm64` 2.0.18/2.0.26 et `@opencode/cli-darwin-arm64` 2.0.26, intégrité SHA-512 vérifiée contre les métadonnées npm. La version courante 2.0.26 a été obtenue depuis `https://opencode.ai/update/api/latest/cli/npm` ; aucun exécutable utilisateur remplacé.
+- Le premier contrat Linux 2.0.18 échouait sur la première image : le catalogue natif était encore partiel, sans le modèle de projet sélectionné. Le contrat public de `model.list` autorise ce snapshot avant stabilisation des plugins. Le correctif attend ce modèle pendant au plus cinq secondes, sans modèle de substitution, et conserve le refus immédiat d'un modèle connu sans support média. Le test `TestOpenCodeAttachmentWaitsForSelectedModelCatalog` couvre cette transition.
+- Après ce correctif, sous Linux : `OPENCODE_TEST_BIN=...2.0.18 go test -race ./internal/box ./internal/integrations/adapters -run OpenCode -count=1 -v` passe, contrat réel compris sans SKIP.
+- Sur macOS, le contrat 2.0.26 échoue avant le premier tour. Une reproduction indépendante de Shipyard, avec `serve --service` et HOME/XDG/base neufs, ne crée pas de registre ni de socket d'écoute en 35 secondes ; seule une trace vide est créée. `api --standalone get /api/info` se bloque également avec ce binaire isolé. L'origine interne n'est pas établie : la compatibilité macOS 2.0.26 reste bloquée.
+- Sous Linux 2.0.26, l'enregistrement du service pouvait précéder sa disponibilité : des créations/reprises renvoyaient HTTP 503. Le lanceur attend désormais un `GET /api/info` authentifié réussi avec le PID exact de son enfant avant toute mutation. Le contrat réel complet passe après ce correctif. La version n'est pas déclarée compatible sur la seule présence de routes dans son schéma.
+- Dernière recette Linux sur les sources finales, sans instrumentation de diagnostic : suite ciblée OpenCode 2.0.18 et adapters réussie, puis contrat réel 2.0.26 répété **5/5** avec `-race -count=5`, sans SKIP. Les conteneurs sont supprimés automatiquement à leur sortie.
+- L'export Linux a été comparé octet par octet à tous les fichiers Go suivis du worktree après `ac1df33` : aucune différence. Go vet et la suite Go race complète passent à nouveau sur ce code final ; build docs également réussi. Journaux de revue conservés dans `app/node_modules/.shipyard-tools/review-go-final.log`, `review-linux-final.log`, `review-macos-current-failure.log` et `review-docs-final.log`.
+- Les reproductions n'utilisent que le faux fournisseur local et des identités synthétiques. Tous les processus arrêtés sont ceux démarrés par les essais ; aucune action sur le service OpenCode personnel.
 
 ## Fichiers de livraison
 
